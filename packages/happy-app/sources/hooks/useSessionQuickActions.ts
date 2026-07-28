@@ -2,7 +2,7 @@ import * as React from 'react';
 import { useHappyAction } from '@/hooks/useHappyAction';
 import { useNavigateToSession } from '@/hooks/useNavigateToSession';
 import { Modal } from '@/modal';
-import { machineResumeSession, sessionArchive, sessionKill, sessionSetAgentModes, forkAndSpawn, type ForkSource } from '@/sync/ops';
+import { machineResumeSession, sessionArchive, sessionKill, sessionRestartCodex, sessionSetAgentModes, forkAndSpawn, type ForkSource } from '@/sync/ops';
 import { maybeCleanupWorktree } from '@/hooks/useWorktreeCleanup';
 import { storage, useLocalSetting, useMachine, useSetting } from '@/sync/storage';
 import { Machine, Session } from '@/sync/storageTypes';
@@ -126,6 +126,12 @@ export function useSessionQuickActions(
         () => expResumeSession ? getResumeAvailability(session, machine, sessionStatus.isConnected) : { canResume: false, canShowResume: false, subtitle: '', message: '' },
         [machine, session, sessionStatus.isConnected, expResumeSession],
     );
+    const canRestartCodex = Boolean(
+        sessionStatus.isConnected
+        && session.metadata?.flavor === 'codex'
+        && session.metadata.codexThreadId
+        && !isRigMetadata(session.metadata),
+    );
 
     // Fork eligibility — separate from resume because fork works on both
     // active AND inactive provider sessions. The user-facing toggle is the same
@@ -228,6 +234,28 @@ export function useSessionQuickActions(
         performResume();
     }, [performResume]);
 
+    const [restartingCodex, performRestartCodex] = useHappyAction(async () => {
+        const result = await sessionRestartCodex(session.id);
+        if (!result.success) {
+            throw new HappyError(result.message || t('session.restartCodexFailed'), false);
+        }
+    });
+
+    const restartCodex = React.useCallback(() => {
+        Modal.alert(
+            t('session.restartCodexTitle'),
+            t('session.restartCodexMessage'),
+            [
+                { text: t('common.cancel'), style: 'cancel' },
+                {
+                    text: t('session.restartCodexAction'),
+                    style: 'destructive',
+                    onPress: performRestartCodex,
+                },
+            ],
+        );
+    }, [performRestartCodex]);
+
     // Fork the session (no truncation) — copies the on-disk Claude JSONL
     // and spawns a fresh Happy session on the same machine. Works for
     // both active and inactive sessions; the source row stays untouched.
@@ -268,6 +296,10 @@ export function useSessionQuickActions(
             items.push({ id: 'resume', icon: 'play-circle-outline', label: t('sessionInfo.resumeSession'), onPress: resumeSession });
         }
 
+        if (canRestartCodex) {
+            items.push({ id: 'restart-codex', icon: 'refresh-outline', label: t('session.restartCodexAction'), onPress: restartCodex });
+        }
+
         if (canFork) {
             items.push({ id: 'fork', icon: 'git-branch-outline', label: t('session.forkAction'), onPress: forkSession });
             items.push({ id: 'duplicate', icon: 'time-outline', label: t('session.duplicateAction'), onPress: openDuplicateSheet });
@@ -285,6 +317,7 @@ export function useSessionQuickActions(
         archiveSession,
         canCopySessionMetadata,
         canFork,
+        canRestartCodex,
         copySessionMetadata,
         copySessionMetadataAndLogs,
         forkSource,
@@ -293,6 +326,7 @@ export function useSessionQuickActions(
         openDuplicateSheet,
         resumeAvailability.canShowResume,
         resumeSession,
+        restartCodex,
     ]);
 
     const showActionAlert = React.useCallback(() => {
@@ -314,6 +348,7 @@ export function useSessionQuickActions(
         canCopySessionMetadata,
         canResume: resumeAvailability.canResume,
         canShowResume: resumeAvailability.canShowResume,
+        canRestartCodex,
         canFork,
         copySessionMetadata,
         copySessionMetadataAndLogs,
@@ -324,6 +359,8 @@ export function useSessionQuickActions(
         resumeSession,
         resumeSessionSubtitle: resumeAvailability.subtitle,
         resumingSession,
+        restartCodex,
+        restartingCodex,
     };
 }
 

@@ -44,6 +44,12 @@ const TASK_TOOL_NAMES = new Set([
 
 export type ToolSummaryCategory = 'terminal' | 'edit' | 'read' | 'search' | 'web' | 'task' | 'other';
 
+export type TerminalToolOutput = {
+    stdout?: string;
+    stderr?: string;
+    error?: string;
+};
+
 export function isTerminalToolName(name: string): boolean {
     return TERMINAL_TOOL_NAMES.has(name);
 }
@@ -140,6 +146,65 @@ export function getTerminalToolCommand(tool: Pick<ToolCall, 'name' | 'input'>): 
     }
 
     return null;
+}
+
+/**
+ * Normalizes the result shapes emitted by the supported terminal tools so the
+ * compact transcript can render their output without knowing the provider.
+ */
+export function getTerminalToolOutput(tool: Pick<ToolCall, 'state' | 'result'>): TerminalToolOutput | null {
+    if (tool.result === undefined || tool.result === null) {
+        return null;
+    }
+
+    if (tool.state === 'error') {
+        return { error: stringifyToolResult(tool.result) };
+    }
+
+    if (typeof tool.result === 'string') {
+        return tool.result.trim().length > 0 ? { stdout: tool.result } : null;
+    }
+
+    if (typeof tool.result === 'object') {
+        const result = tool.result as Record<string, unknown>;
+        const stdout = getOutputText(result.stdout)
+            ?? getOutputText(result.output)
+            ?? getOutputText(result.content)
+            ?? getOutputText(result.aggregated_output);
+        const stderr = getOutputText(result.stderr);
+        const error = getOutputText(result.error);
+
+        if (stdout || stderr || error) {
+            return { stdout, stderr, error };
+        }
+    }
+
+    return { stdout: stringifyToolResult(tool.result) };
+}
+
+function getOutputText(value: unknown): string | undefined {
+    if (typeof value === 'string') {
+        return value.trim().length > 0 ? value : undefined;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+    }
+    if (value !== undefined && value !== null) {
+        return stringifyToolResult(value);
+    }
+    return undefined;
+}
+
+function stringifyToolResult(value: unknown): string {
+    if (typeof value === 'string') {
+        return value;
+    }
+    try {
+        const result = JSON.stringify(value, null, 2);
+        return typeof result === 'string' ? result : String(value);
+    } catch {
+        return String(value);
+    }
 }
 
 function getPatchFiles(input: any): string[] {

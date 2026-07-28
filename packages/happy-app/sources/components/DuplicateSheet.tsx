@@ -17,13 +17,13 @@ import { getSessionForkSource } from '@/utils/sessionFork';
 
 export interface DuplicateSheetProps {
     sessionId: string;
-    /** Pre-select this rewind uuid when the sheet opens (long-press entry). */
+    /** Pre-select this rewind uuid when the sheet opens from a message action. */
     initialClaudeUuid?: string;
     /** Pre-select this provider rewind id when the sheet opens (Claude uuid or Codex item id). */
     initialRewindPointId?: string;
     /** Fallback preselect text for Codex live messages that do not yet carry an item id. */
     initialMessageText?: string;
-    /** In-app message id used for fork lineage when opened from a message long-press. */
+    /** In-app message id used for fork lineage when opened from a message action. */
     initialForkedFromMessageId?: string;
     /** Injected by the modal infra. */
     onClose?: () => void;

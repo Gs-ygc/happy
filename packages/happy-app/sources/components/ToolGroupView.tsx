@@ -16,7 +16,7 @@ import { layout } from './layout';
 import { useElapsedTime } from '@/hooks/useElapsedTime';
 import { t } from '@/text';
 import { Message, ToolCallMessage } from '@/sync/typesMessage';
-import { getToolSummaryCategory, getToolSummaryDetail, ToolSummaryCategory } from '@/utils/toolDisplay';
+import { getToolSummaryCategory, getToolSummaryDetail, isTerminalToolName, ToolSummaryCategory } from '@/utils/toolDisplay';
 import { useRouter } from 'expo-router';
 import { formatMCPTitle } from './tools/views/MCPToolView';
 
@@ -37,7 +37,10 @@ export const ToolGroupView = React.memo<ToolGroupViewProps>((props) => {
     const summary = React.useMemo(() => generateGroupSummary(group.messages), [group.messages]);
     const summaryCategory = React.useMemo(() => getGroupSummaryCategory(group.messages), [group.messages]);
     const hasRunning = !forceCompleted && group.hasRunning;
-    const suppressChildren = hideSingleToolChildren && group.messages.length === 1 && group.messages[0]?.kind === 'tool-call';
+    const suppressChildren = hideSingleToolChildren
+        && group.messages.length === 1
+        && group.messages[0]?.kind === 'tool-call'
+        && !isTerminalToolName(group.messages[0].tool.name);
     const singleToolMessage = suppressChildren && group.messages[0]?.kind === 'tool-call'
         ? group.messages[0]
         : null;
@@ -123,13 +126,7 @@ export const AgentWorkGroupView = React.memo<AgentWorkGroupViewProps>((props) =>
     );
 
     const [collapsedToolGroups, setCollapsedToolGroups] = React.useState<Set<string>>(() => {
-        const initial = new Set<string>();
-        for (const item of nestedItemsNewestFirst) {
-            if (item.type === 'tool-group' && !item.hasPendingPermission) {
-                initial.add(item.id);
-            }
-        }
-        return initial;
+        return new Set();
     });
     const manuallyCollapsedToolGroupsRef = React.useRef<Set<string>>(new Set());
 
@@ -145,10 +142,6 @@ export const AgentWorkGroupView = React.memo<AgentWorkGroupViewProps>((props) =>
                     next.delete(item.id);
                     changed = true;
                     continue;
-                }
-                if (!item.hasPendingPermission && !next.has(item.id)) {
-                    next.add(item.id);
-                    changed = true;
                 }
             }
             return changed ? next : prev;
@@ -289,7 +282,8 @@ function ToolGroupMessageRow(props: {
     }
 
     const shouldRenderFullTool = props.message.tool.permission?.status === 'pending'
-        || props.message.tool.name === 'AskUserQuestion';
+        || props.message.tool.name === 'AskUserQuestion'
+        || isTerminalToolName(props.message.tool.name);
     if (shouldRenderFullTool) {
         return (
             <MessageView

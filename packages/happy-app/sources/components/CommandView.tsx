@@ -97,25 +97,25 @@ export const CommandView = React.memo<CommandViewProps>(({
         ]}>
             {/* Command Line */}
             <View style={styles.line}>
-                <Text style={styles.promptText}>{prompt} </Text>
-                <Text style={styles.commandText}>{command}</Text>
+                <Text selectable style={styles.promptText}>{prompt} </Text>
+                <Text selectable style={styles.commandText}>{command}</Text>
             </View>
 
             {hasNewProps ? (
                 <>
                     {/* Standard Output */}
                     {stdout && stdout.trim() && (
-                        <Text style={styles.stdout}>{stdout}</Text>
+                        <Text selectable style={styles.stdout}>{stdout}</Text>
                     )}
 
                     {/* Standard Error */}
                     {stderr && stderr.trim() && (
-                        <Text style={styles.stderr}>{stderr}</Text>
+                        <Text selectable style={styles.stderr}>{stderr}</Text>
                     )}
 
                     {/* Error Message */}
                     {error && (
-                        <Text style={styles.error}>{error}</Text>
+                        <Text selectable style={styles.error}>{error}</Text>
                     )}
 
                     {/* Empty output indicator */}
@@ -126,10 +126,9 @@ export const CommandView = React.memo<CommandViewProps>(({
             ) : (
                 /* Legacy output format */
                 output && (
-                    <Text style={styles.commandText}>{'\n---\n' + output}</Text>
+                    <Text selectable style={styles.commandText}>{'\n---\n' + output}</Text>
                 )
             )}
         </View>
     );
 });
-

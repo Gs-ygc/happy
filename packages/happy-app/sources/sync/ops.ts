@@ -145,6 +145,12 @@ interface SessionKillResponse {
     message: string;
 }
 
+interface SessionRestartCodexResponse {
+    success: boolean;
+    threadId?: string;
+    message?: string;
+}
+
 // Response types for spawn session
 export type SpawnSessionResult =
     | { type: 'success'; sessionId: string }
@@ -704,6 +710,32 @@ export async function sessionAbort(sessionId: string): Promise<void> {
 }
 
 /**
+ * Restart the Codex app-server and resume the current thread in place.
+ */
+export async function sessionRestartCodex(sessionId: string): Promise<SessionRestartCodexResponse> {
+    const metadata = storage.getState().sessions[sessionId]?.metadata;
+    if (isRigMetadata(metadata) || metadata?.flavor !== 'codex') {
+        return { success: false, message: 'Restart is only available for Codex sessions' };
+    }
+    if (!metadata.codexThreadId) {
+        return { success: false, message: 'This Codex session does not have an active thread to restart' };
+    }
+
+    try {
+        return await apiSocket.sessionRPC<SessionRestartCodexResponse, {}>(
+            sessionId,
+            'restartCodex',
+            {},
+        );
+    } catch (error) {
+        return {
+            success: false,
+            message: error instanceof Error ? error.message : 'Unknown error',
+        };
+    }
+}
+
+/**
  * Allow a permission request
  */
 export async function sessionAllow(sessionId: string, id: string, mode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan', allowedTools?: string[], decision?: 'approved' | 'approved_for_session', updatedInput?: Record<string, unknown>): Promise<void> {
@@ -1105,5 +1137,6 @@ export type {
     SessionGetDirectoryTreeResponse,
     TreeNode,
     SessionRipgrepResponse,
-    SessionKillResponse
+    SessionKillResponse,
+    SessionRestartCodexResponse,
 };

@@ -3,7 +3,8 @@ import * as React from 'react';
 import { Image, Pressable, View, Platform } from 'react-native';
 import { HorizontalScrollView } from '../HorizontalScrollView';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { StyleSheet } from 'react-native-unistyles';
+import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../StyledText';
 import { Typography } from '@/constants/Typography';
 import { SimpleSyntaxHighlighter } from '../SimpleSyntaxHighlighter';
@@ -162,12 +163,25 @@ function RenderNumberedListBlock(props: { items: { number: number, depth: number
 }
 
 function RenderCodeBlock(props: { content: string, language: string | null, first: boolean, last: boolean, selectable: boolean }) {
+    const { theme } = useUnistyles();
     const [isHovered, setIsHovered] = React.useState(false);
+    const [copied, setCopied] = React.useState(false);
+    const resetCopiedTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    React.useEffect(() => () => {
+        if (resetCopiedTimer.current) {
+            clearTimeout(resetCopiedTimer.current);
+        }
+    }, []);
 
     const copyCode = React.useCallback(async () => {
         try {
             await Clipboard.setStringAsync(props.content);
-            Modal.alert(t('common.success'), t('markdown.codeCopied'), [{ text: t('common.ok'), style: 'cancel' }]);
+            setCopied(true);
+            if (resetCopiedTimer.current) {
+                clearTimeout(resetCopiedTimer.current);
+            }
+            resetCopiedTimer.current = setTimeout(() => setCopied(false), 1600);
         } catch (error) {
             console.error('Failed to copy code:', error);
             Modal.alert(t('common.error'), t('markdown.copyFailed'), [{ text: t('common.ok'), style: 'cancel' }]);
@@ -184,7 +198,11 @@ function RenderCodeBlock(props: { content: string, language: string | null, firs
         >
             {props.language && <Text selectable={props.selectable} style={style.codeLanguage}>{props.language}</Text>}
             <HorizontalScrollView
-                contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 16 }}
+                contentContainerStyle={{
+                    paddingHorizontal: 16,
+                    paddingTop: Platform.OS !== 'web' && !props.language ? 44 : 16,
+                    paddingBottom: 16,
+                }}
             >
                 <SimpleSyntaxHighlighter
                     code={props.content}
@@ -193,14 +211,24 @@ function RenderCodeBlock(props: { content: string, language: string | null, firs
                 />
             </HorizontalScrollView>
             <View
-                style={[style.copyButtonWrapper, isHovered && style.copyButtonWrapperVisible]}
+                style={[
+                    style.copyButtonWrapper,
+                    (Platform.OS !== 'web' || isHovered) && style.copyButtonWrapperVisible,
+                ]}
                 {...(Platform.OS === 'web' ? ({ className: 'copy-button-wrapper' } as any) : {})}
             >
                 <Pressable
-                    style={style.copyButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={copied ? t('common.copied') : t('common.copy')}
+                    hitSlop={8}
+                    style={({ pressed }) => [style.copyButton, pressed && style.copyButtonPressed]}
                     onPress={copyCode}
                 >
-                    <Text style={style.copyButtonText}>{t('common.copy')}</Text>
+                    <Ionicons
+                        name={copied ? 'checkmark' : 'copy-outline'}
+                        size={15}
+                        color={copied ? theme.colors.success : theme.colors.textSecondary}
+                    />
                 </Pressable>
             </View>
         </View>
@@ -515,6 +543,7 @@ const style = StyleSheet.create((theme) => ({
         fontSize: 12,
         marginTop: 8,
         paddingHorizontal: 16,
+        paddingRight: 52,
         marginBottom: 0,
     },
     codeText: {
@@ -562,12 +591,17 @@ const style = StyleSheet.create((theme) => ({
     },
     copyButton: {
         backgroundColor: theme.colors.surfaceHighest,
-        paddingHorizontal: 8,
-        paddingVertical: 4,
+        width: 28,
+        height: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
         borderRadius: 4,
         borderWidth: 1,
         borderColor: theme.colors.divider,
         cursor: 'pointer',
+    },
+    copyButtonPressed: {
+        opacity: 0.65,
     },
     copyButtonHidden: {
         display: 'none',

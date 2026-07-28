@@ -741,6 +741,10 @@ describe('ApiSessionClient v3 messages API migration', () => {
             content: {
                 type: 'text',
                 text: 'from fetch'
+            },
+            meta: {
+                model: 'gpt-5.6-sol',
+                effort: 'ultra'
             }
         };
 

@@ -21,10 +21,7 @@ export const MessageView = React.memo((props: {
   metadata: Metadata | null;
   sessionId: string;
   getMessageById?: (id: string) => Message | null;
-  /**
-   * Long-press handler for user-text bubbles. Wired by ChatList from
-   * the active session screen and used by the fork-from-message flow.
-   */
+  /** Opens the fork-from-message flow from the message action button. */
   onForkFromUserMessage?: (messageId: string, rewindPointId: string | undefined, messageText: string) => void;
 }) => {
   return (
@@ -106,11 +103,27 @@ function UserTextBlock(props: {
   const bubbleStyle = {
     backgroundColor: bubblePalette.background,
   };
-  const handleLongPress = React.useCallback(() => {
+  const handleForkPress = React.useCallback(() => {
     if (props.onForkFromUserMessage) {
       props.onForkFromUserMessage(props.message.id, rewindPointId, props.message.text);
     }
   }, [props.message.id, props.message.text, props.onForkFromUserMessage, rewindPointId]);
+  const renderForkButton = (marginBottom: number) => canFork ? (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t('session.forkFromHere')}
+      hitSlop={8}
+      onPress={handleForkPress}
+      {...(Platform.OS === 'web' ? ({ title: t('session.forkFromHere') } as any) : {})}
+      style={({ pressed }) => [
+        styles.forkButton,
+        { marginBottom },
+        pressed && styles.forkButtonPressed,
+      ]}
+    >
+      <Ionicons name="git-branch-outline" size={16} color={theme.colors.textSecondary} />
+    </Pressable>
+  ) : null;
 
   // Claude Agent SDK emits synthetic user messages wrapped in tags like
   // <local-command-caveat>…</local-command-caveat> and
@@ -139,13 +152,12 @@ function UserTextBlock(props: {
   if (parsed.kind === 'goal-run') {
     return (
       <View style={styles.userMessageContainer}>
-        <Pressable
-          onLongPress={canFork ? handleLongPress : undefined}
-          delayLongPress={400}
-          style={[styles.userMessageBubble, bubbleStyle, styles.goalMessageBubble]}
-        >
-          <MarkdownView markdown={parsed.goal} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
-        </Pressable>
+        <View style={styles.userMessageRow}>
+          {renderForkButton(6)}
+          <View style={[styles.userMessageBubble, bubbleStyle, styles.goalMessageBubble]}>
+            <MarkdownView markdown={parsed.goal} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+          </View>
+        </View>
         <View style={styles.goalSentRow}>
           <Ionicons name="locate-outline" size={16} color={styles.goalSentText.color} />
           <Text style={styles.goalSentText}>{t('message.sentAsGoal')}</Text>
@@ -157,16 +169,18 @@ function UserTextBlock(props: {
     return (
       <View style={styles.userMessageContainer}>
         {parsed.args ? (
-          <Pressable
-            onLongPress={canFork ? handleLongPress : undefined}
-            delayLongPress={400}
-            style={[styles.userMessageBubble, bubbleStyle, styles.commandMessageBubble]}
-          >
-            <MarkdownView markdown={parsed.args} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
-          </Pressable>
+          <View style={styles.userMessageRow}>
+            {renderForkButton(6)}
+            <View style={[styles.userMessageBubble, bubbleStyle, styles.commandMessageBubble]}>
+              <MarkdownView markdown={parsed.args} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+            </View>
+          </View>
         ) : null}
-        <View style={[styles.commandChip, bubbleStyle]}>
-          <Text style={styles.commandChipText}>/{parsed.commandName}</Text>
+        <View style={styles.userMessageRow}>
+          {!parsed.args ? renderForkButton(12) : null}
+          <View style={[styles.commandChip, bubbleStyle]}>
+            <Text style={styles.commandChipText}>/{parsed.commandName}</Text>
+          </View>
         </View>
       </View>
     );
@@ -174,13 +188,12 @@ function UserTextBlock(props: {
 
   return (
     <View style={styles.userMessageContainer}>
-      <Pressable
-        onLongPress={canFork ? handleLongPress : undefined}
-        delayLongPress={400}
-        style={[styles.userMessageBubble, bubbleStyle]}
-      >
-        <MarkdownView markdown={parsed.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
-      </Pressable>
+      <View style={styles.userMessageRow}>
+        {renderForkButton(12)}
+        <View style={[styles.userMessageBubble, bubbleStyle]}>
+          <MarkdownView markdown={parsed.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+        </View>
+      </View>
     </View>
   );
 }
@@ -290,6 +303,27 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: 'flex-end',
     paddingHorizontal: 16,
   },
+  userMessageRow: {
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  forkButton: {
+    width: 30,
+    height: 30,
+    marginRight: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: theme.colors.divider,
+    backgroundColor: theme.colors.surfaceHigh,
+    flexShrink: 0,
+  },
+  forkButtonPressed: {
+    opacity: 0.6,
+  },
   userMessageBubble: {
     backgroundColor: theme.colors.userMessageBackground,
     paddingHorizontal: 12,
@@ -297,6 +331,8 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: 12,
     marginBottom: 12,
     maxWidth: '100%',
+    minWidth: 0,
+    flexShrink: 1,
   },
   goalMessageBubble: {
     marginBottom: 6,
@@ -325,6 +361,8 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: 10,
     marginBottom: 12,
     maxWidth: '100%',
+    minWidth: 0,
+    flexShrink: 1,
     opacity: 0.65,
   },
   commandChipText: {
