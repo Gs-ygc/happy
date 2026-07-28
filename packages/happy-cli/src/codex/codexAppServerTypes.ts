@@ -266,7 +266,7 @@ export type ReviewDecision =
 
 export type ApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
-export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 export type ReasoningSummary = "auto" | "concise" | "detailed" | "none";
 export type TurnAbortReason = "interrupted" | "replaced" | "review_ended";
 
@@ -314,4 +314,27 @@ export type JsonRpcResponse = {
     id: number;
     result?: unknown;
     error?: { code: number; message: string; data?: unknown };
+};
+
+// model/list enumerates the models the Codex backend currently offers.
+export type CodexModel = {
+    id: string;
+    model: string;
+    displayName: string;
+    description: string;
+    hidden: boolean;
+    isDefault: boolean;
+    defaultReasoningEffort: string;
+    supportedReasoningEfforts: string[];
+};
+
+export type ListModelsParams = {
+    cursor?: string | null;
+    includeHidden?: boolean | null;
+    limit?: number | null;
+};
+
+export type ListModelsResponse = {
+    data: CodexModel[];
+    nextCursor?: string | null;
 };

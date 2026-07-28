@@ -699,7 +699,7 @@ export async function startDaemon(): Promise<void> {
       }
     };
 
-    const resumeSession = async (happySessionId: string, options?: { model?: string; permissionMode?: string }): Promise<SpawnSessionResult> => {
+    const resumeSession = async (happySessionId: string, options?: { model?: string; permissionMode?: string; effortLevel?: string }): Promise<SpawnSessionResult> => {
       try {
         const tracked = findTrackedSessionById(happySessionId);
         if (!tracked) {
@@ -733,6 +733,9 @@ export async function startDaemon(): Promise<void> {
 
         if (options?.model) {
           launch.args.push('--model', options.model);
+        }
+        if (options?.effortLevel) {
+          launch.args.push('--effort', options.effortLevel);
         }
         // Same as spawnSession: for claude, ambient 'default' must not
         // override the CLI default; for codex, 'default' is a concrete

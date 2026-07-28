@@ -190,6 +190,7 @@ export function useSessionQuickActions(
             machineId,
             sessionId: session.id,
             model: modeMeta.model ?? undefined,
+            effortLevel: modeMeta.effort ?? undefined,
             permissionMode: modeMeta.permissionMode,
         });
 

@@ -31,6 +31,7 @@ import type {
     RollbackConversationResponse,
     InjectItemsParams,
     InjectItemsResponse,
+    CodexModel,
     ThreadGoalSetParams,
     ThreadGoalSetResponse,
     ThreadGoalClearParams,
@@ -41,6 +42,8 @@ import type {
     EventMsg,
     JsonRpcRequest,
     JsonRpcResponse,
+    ListModelsParams,
+    ListModelsResponse,
     ApprovalPolicy,
     SandboxMode,
     InputItem,
@@ -59,6 +62,9 @@ type PendingRequest = {
 };
 
 type LegacyPatchChanges = Record<string, Record<string, unknown>>;
+
+const MODEL_LIST_PAGE_SIZE = 100;
+const MODEL_LIST_MAX_PAGES = 10;
 
 export type ApprovalHandler = (params: {
     type: 'exec' | 'patch' | 'mcp';
@@ -928,6 +934,28 @@ export class CodexAppServerClient {
             items: opts.items,
         };
         return await this.request('thread/inject_items', params) as InjectItemsResponse;
+    }
+
+    async listModels(opts?: { includeHidden?: boolean }): Promise<CodexModel[]> {
+        const models: CodexModel[] = [];
+        let cursor: string | null | undefined;
+
+        for (let page = 0; page < MODEL_LIST_MAX_PAGES; page++) {
+            const params: ListModelsParams = {
+                includeHidden: opts?.includeHidden ?? false,
+                limit: MODEL_LIST_PAGE_SIZE,
+                ...(cursor ? { cursor } : {}),
+            };
+            const response = await this.request('model/list', params) as ListModelsResponse;
+            models.push(...response.data);
+            cursor = response.nextCursor;
+            if (!cursor) {
+                return models;
+            }
+        }
+
+        logger.debug(`[codex] model/list exceeded ${MODEL_LIST_MAX_PAGES} pages; returning ${models.length} models`);
+        return models;
     }
 
     async setGoal(opts: {

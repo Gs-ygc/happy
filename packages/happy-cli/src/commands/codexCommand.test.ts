@@ -118,7 +118,7 @@ describe('handleCodexCommand', () => {
   })
 
   it('passes model and effort through to runCodex', async () => {
-    await handleCodexCommand(['--model', 'gpt-5.4', '--effort', 'xhigh'])
+    await handleCodexCommand(['--model', 'gpt-5.6-sol', '--effort', 'ultra'])
 
     expect(mocks.mockRunCodex).toHaveBeenCalledWith({
       credentials: { token: 'token' },
@@ -126,8 +126,22 @@ describe('handleCodexCommand', () => {
       noSandbox: false,
       resumeThreadId: undefined,
       permissionMode: undefined,
-      model: 'gpt-5.4',
-      effort: 'xhigh',
+      model: 'gpt-5.6-sol',
+      effort: 'ultra',
+    })
+  })
+
+  it('passes equals-form model and effort through to runCodex', async () => {
+    await handleCodexCommand(['--model=gpt-5.6-sol', '--effort=max', '--permission-mode=yolo'])
+
+    expect(mocks.mockRunCodex).toHaveBeenCalledWith({
+      credentials: { token: 'token' },
+      startedBy: undefined,
+      noSandbox: false,
+      resumeThreadId: undefined,
+      permissionMode: 'yolo',
+      model: 'gpt-5.6-sol',
+      effort: 'max',
     })
   })
 })

@@ -605,6 +605,52 @@ describe('CodexAppServerClient sandbox integration', () => {
         await client.disconnect();
     });
 
+    it('lists all visible Codex model pages', async () => {
+        const requests: MockRpcMessage[] = [];
+        const proc = createMockProcess({
+            onRequest: (msg, stdout) => {
+                requests.push(msg);
+                if (msg.method !== 'model/list' || msg.id == null) return;
+
+                const id = msg.params?.cursor ? 'gpt-5.6-terra' : 'gpt-5.6-sol';
+                setTimeout(() => {
+                    pushJsonLine(stdout, {
+                        id: msg.id,
+                        result: {
+                            data: [{
+                                id,
+                                model: id,
+                                displayName: id,
+                                description: '',
+                                hidden: false,
+                                isDefault: id === 'gpt-5.6-sol',
+                                defaultReasoningEffort: 'max',
+                                supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+                            }],
+                            nextCursor: msg.params?.cursor ? null : 'page-2',
+                        },
+                    });
+                }, 0);
+            },
+        });
+        mockSpawn.mockImplementation(() => proc);
+
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient();
+        await client.connect();
+
+        await expect(client.listModels()).resolves.toMatchObject([
+            { id: 'gpt-5.6-sol' },
+            { id: 'gpt-5.6-terra' },
+        ]);
+        expect(requests.filter((msg) => msg.method === 'model/list').map((msg) => msg.params)).toEqual([
+            { includeHidden: false, limit: 100 },
+            { includeHidden: false, limit: 100, cursor: 'page-2' },
+        ]);
+
+        await client.disconnect();
+    });
+
     it('clears active thread state so the next prompt starts a fresh thread', async () => {
         const requests: MockRpcMessage[] = [];
         let nextThreadNumber = 1;

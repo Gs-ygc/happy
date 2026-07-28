@@ -4,6 +4,7 @@ import {
     getAvailableModels,
     getAvailablePermissionModes,
     getCodexModelModes,
+    getCodexEffortLevels,
     getClaudeModelModes,
     getClaudePermissionModes,
     getDefaultEffortKey,
@@ -74,8 +75,19 @@ describe('modelModeOptions', () => {
         expect(getDefaultModelKey('claude')).toBe('opus');
         expect(getDefaultEffortKey('claude')).toBe('medium');
         expect(getDefaultPermissionModeKey('codex')).toBe('yolo');
-        expect(getDefaultModelKey('codex')).toBe('gpt-5.5');
-        expect(getDefaultEffortKey('codex')).toBe('medium');
+        expect(getDefaultModelKey('codex')).toBe('gpt-5.6-sol');
+        expect(getDefaultEffortKey('codex')).toBe('max');
+    });
+
+    it('offers codex max and ultra effort levels', () => {
+        expect(getCodexEffortLevels().map((level) => level.key)).toEqual([
+            'low',
+            'medium',
+            'high',
+            'xhigh',
+            'max',
+            'ultra',
+        ]);
     });
 
     it('prefers metadata models over hardcoded fallbacks', () => {

@@ -346,6 +346,8 @@ export function getCodexEffortLevels(): EffortLevel[] {
         { key: 'medium', name: 'medium' },
         { key: 'high', name: 'high' },
         { key: 'xhigh', name: 'xhigh' },
+        { key: 'max', name: 'Max', description: 'For difficult problems when quality matters more than speed · higher usage' },
+        { key: 'ultra', name: 'Ultra', description: 'For demanding work using multiple agents · highest usage' },
     ];
 }
 

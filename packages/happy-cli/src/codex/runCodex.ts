@@ -4,6 +4,7 @@ import { ApiClient } from '@/api/api';
 import { CodexAppServerClient } from './codexAppServerClient';
 import type { ReasoningEffort } from './codexAppServerTypes';
 import { CodexPermissionHandler } from './utils/permissionHandler';
+import { toMetadataModels } from './utils/modelMetadata';
 import { ReasoningProcessor } from './utils/reasoningProcessor';
 import { DiffProcessor } from './utils/diffProcessor';
 import { randomUUID } from 'node:crypto';
@@ -81,9 +82,26 @@ function hasCodexSubagentReference(message: Record<string, unknown>): boolean {
     return false;
 }
 
-const DEFAULT_CODEX_MODEL = 'gpt-5.5';
-const DEFAULT_CODEX_EFFORT: ReasoningEffort = 'medium';
+const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
+const DEFAULT_CODEX_EFFORT: ReasoningEffort = 'max';
 const DEFAULT_CODEX_PERMISSION_MODE: PermissionMode = 'yolo';
+
+async function publishCodexModelMetadata(
+    client: CodexAppServerClient,
+    session: ApiSessionClient,
+): Promise<void> {
+    try {
+        const models = toMetadataModels(await client.listModels());
+        if (models.length === 0) {
+            logger.debug('[codex] model/list returned no visible models; keeping app defaults');
+            return;
+        }
+        session.updateMetadata((meta) => ({ ...meta, models }));
+        logger.debug(`[codex] published ${models.length} models to session metadata`);
+    } catch (error) {
+        logger.debug('[codex] model/list unavailable; app will fall back to hardcoded models', error);
+    }
+}
 
 /**
  * Main entry point for the codex command with ink UI
@@ -310,7 +328,7 @@ export async function runCodex(opts: {
     ];
 
     const VALID_REMOTE_EFFORTS: readonly ReasoningEffort[] = [
-        'none', 'minimal', 'low', 'medium', 'high', 'xhigh',
+        'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
     ];
 
     const handleUserMessage = createSerialAsyncHandler<UserMessage>(async (message) => {
@@ -923,6 +941,8 @@ export async function runCodex(opts: {
         logger.debug('[codex]: client.connect begin');
         await client.connect();
         logger.debug('[codex]: client.connect done');
+
+        await publishCodexModelMetadata(client, session);
 
         if (opts.resumeThreadId) {
             await resumeExistingThread({

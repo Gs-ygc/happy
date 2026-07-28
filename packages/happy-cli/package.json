@@ -58,6 +58,9 @@
     "tools/licenses",
     "package.json"
   ],
+  "bundledDependencies": [
+    "@slopus/happy-wire"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "bundle:server": "node scripts/bundle-server.cjs",
