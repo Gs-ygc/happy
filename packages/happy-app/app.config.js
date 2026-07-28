@@ -59,7 +59,7 @@ export default {
     expo: {
         name,
         slug: "happy",
-        version: "1.7.0",
+        version: "1.7.1",
         runtimeVersion: "21",
         orientation: "default",
         icon: "./sources/assets/images/icon.png",
@@ -92,6 +92,7 @@ export default {
                 : {})
         },
         android: {
+            versionCode: 141,
             adaptiveIcon: {
                 foregroundImage: "./sources/assets/images/icon-adaptive.png",
                 monochromeImage: "./sources/assets/images/icon-monochrome.png",
