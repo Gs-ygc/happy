@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ToolCall } from '@/sync/typesMessage';
 import {
+    getTerminalToolOutput,
     getTerminalToolCommand,
     getToolSummaryCategory,
     getToolSummaryDetail,
@@ -78,5 +79,22 @@ describe('terminal tool display helpers', () => {
         expect(getToolSummaryDetail(tool('MultiEdit', {
             file_path: '/repo/src/app.tsx',
         }))).toBe('/repo/src/app.tsx');
+    });
+
+    it('normalizes terminal output from strings and structured results', () => {
+        expect(getTerminalToolOutput({
+            state: 'completed',
+            result: 'hello\n',
+        })).toEqual({ stdout: 'hello\n' });
+
+        expect(getTerminalToolOutput({
+            state: 'completed',
+            result: { stdout: 'out', stderr: 'warning' },
+        })).toEqual({ stdout: 'out', stderr: 'warning', error: undefined });
+
+        expect(getTerminalToolOutput({
+            state: 'error',
+            result: { message: 'failed' },
+        })).toEqual({ error: '{\n  "message": "failed"\n}' });
     });
 });

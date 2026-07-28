@@ -12,6 +12,7 @@ import { BashViewFull } from './BashViewFull';
 import { EditViewFull } from './EditViewFull';
 import { MultiEditViewFull } from './MultiEditViewFull';
 import { CodexBashView } from './CodexBashView';
+import { CodexBashViewFull } from './CodexBashViewFull';
 import { CodexPatchView } from './CodexPatchView';
 import { CodexDiffView } from './CodexDiffView';
 import { AskUserQuestionView } from './AskUserQuestionView';
@@ -54,7 +55,7 @@ export const toolViewRegistry: Record<string, ToolViewComponent> = {
 
 export const toolFullViewRegistry: Record<string, ToolViewComponent> = {
     Bash: BashViewFull,
-    CodexBash: CodexBashView,
+    CodexBash: CodexBashViewFull,
     Edit: EditViewFull,
     MultiEdit: MultiEditViewFull,
     Task: TaskView,
@@ -75,6 +76,7 @@ export function getToolFullViewComponent(toolName: string): ToolViewComponent | 
 export { EditView } from './EditView';
 export { BashView } from './BashView';
 export { CodexBashView } from './CodexBashView';
+export { CodexBashViewFull } from './CodexBashViewFull';
 export { CodexPatchView } from './CodexPatchView';
 export { CodexDiffView } from './CodexDiffView';
 export { BashViewFull } from './BashViewFull';

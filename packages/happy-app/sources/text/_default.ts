@@ -327,6 +327,10 @@ export const en = {
         inactiveArchived: 'This session is inactive.',
         resumeFromTerminal: 'To resume it from the terminal:',
         newChat: 'New chat',
+        restartCodexAction: 'Restart Codex',
+        restartCodexTitle: 'Restart this Codex session?',
+        restartCodexMessage: 'This stops the current task, restarts the Codex backend, and resumes the same thread. The Happy session and message history stay unchanged.',
+        restartCodexFailed: 'Failed to restart the Codex session.',
         statusBarContext: 'Context',
         statusBarPathTitle: 'Working directory',
         // Fork / duplicate / rewind flow (Claude only)

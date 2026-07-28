@@ -1,18 +1,21 @@
 import * as React from 'react';
 import { useSession, useSessionMessages, useSetting } from "@/sync/storage";
 import { sync } from '@/sync/sync';
-import { ActivityIndicator, AppState, FlatList, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, View } from 'react-native';
+import { ActivityIndicator, FlatList, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, View } from 'react-native';
 import { useCallback } from 'react';
 import { useHeaderHeight } from '@/utils/responsive';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MessageView } from './MessageView';
 import { AgentWorkGroupView, ToolGroupView } from './ToolGroupView';
+import { DuplicateSheet } from './DuplicateSheet';
 import { Metadata, Session } from '@/sync/storageTypes';
 import { ChatFooter } from './ChatFooter';
 import { Message } from '@/sync/typesMessage';
 import { DisplayItem, ToolGroupItem, useGroupedMessages } from '@/hooks/useGroupedMessages';
 import { Octicons } from '@expo/vector-icons';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { Modal } from '@/modal';
+import { useSessionQuickActions } from '@/hooks/useSessionQuickActions';
 import { resolveControlMode } from '@/sync/controlHandoff';
 import { usesControlledSessionUi } from '@/sync/rig';
 
@@ -128,106 +131,58 @@ const ChatListInternal = React.memo((props: {
     );
     const displayItems = useGroupedMessages(props.messages, groupToolCalls, groupingOptions);
 
-    // Tracks which groups are explicitly collapsed. Groups start collapsed;
-    // pending approval groups are the only ones we auto-expand.
+    // Keep the latest work/tool group expanded so current output is visible,
+    // while leaving older history compact. New groups also start expanded.
     const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => {
         const initial = new Set<string>();
+        let foundLatestGroup = false;
         for (const item of displayItems) {
-            if (isCollapsibleDisplayItem(item) && !item.hasPendingPermission) {
+            if (!isCollapsibleDisplayItem(item)) {
+                continue;
+            }
+            if (!foundLatestGroup) {
+                foundLatestGroup = true;
+                continue;
+            }
+            if (!item.hasPendingPermission) {
                 initial.add(item.id);
             }
         }
         return initial;
     });
+    const hasInitializedGroupsRef = React.useRef(displayItems.some(isCollapsibleDisplayItem));
 
     // Auto-expand groups that need user approval — but only if the user
     // hasn't manually collapsed them.
     // We track manually-collapsed IDs so we never force-reopen them.
     const manuallyCollapsedRef = React.useRef<Set<string>>(new Set());
-    const initialSeenCollapsibleGroups = React.useMemo(() => {
-        const initial = new Set<string>();
-        for (const item of displayItems) {
-            if (isCollapsibleDisplayItem(item)) {
-                initial.add(item.id);
-            }
-        }
-        return initial;
-    }, []);
-    const seenCollapsibleGroupsRef = React.useRef<Set<string>>(initialSeenCollapsibleGroups);
-
     React.useEffect(() => {
         setCollapsedGroups((prev) => {
             let changed = false;
             const next = new Set(prev);
-            const seen = seenCollapsibleGroupsRef.current;
+            const groups = displayItems.filter(isCollapsibleDisplayItem);
+            if (!hasInitializedGroupsRef.current && groups.length > 0) {
+                hasInitializedGroupsRef.current = true;
+                for (const item of groups.slice(1)) {
+                    if (!item.hasPendingPermission) {
+                        next.add(item.id);
+                        changed = true;
+                    }
+                }
+            }
             for (const item of displayItems) {
                 if (!isCollapsibleDisplayItem(item)) {
                     continue;
-                }
-                const isNewGroup = !seen.has(item.id);
-                if (isNewGroup) {
-                    seen.add(item.id);
                 }
                 if (item.hasPendingPermission && prev.has(item.id) && !manuallyCollapsedRef.current.has(item.id)) {
                     next.delete(item.id);
                     changed = true;
                     continue;
                 }
-                if (isNewGroup && !item.hasPendingPermission) {
-                    next.add(item.id);
-                    changed = true;
-                }
             }
             return changed ? next : prev;
         });
     }, [displayItems]);
-
-    // Ref so AppState handler reads fresh items without re-subscribing
-    const displayItemsRef = React.useRef(displayItems);
-    displayItemsRef.current = displayItems;
-
-    // Auto-collapse completed groups when app goes to background / tab hidden
-    React.useEffect(() => {
-        const sub = AppState.addEventListener('change', (state) => {
-            if (state !== 'active') {
-                setCollapsedGroups((prev) => {
-                    const next = new Set(prev);
-                    for (const item of displayItemsRef.current) {
-                        if (isCollapsibleDisplayItem(item) && !item.hasRunning) {
-                            next.add(item.id);
-                        }
-                    }
-                    return next;
-                });
-            }
-        });
-        return () => sub.remove();
-    }, []);
-
-    // Auto-collapse all previous groups when user sends a new message
-    const latestUserMsgId = React.useMemo(() => {
-        for (const msg of props.messages) {
-            if (msg.kind === 'user-text') return msg.id;
-        }
-        return null;
-    }, [props.messages]);
-
-    const prevUserMsgIdRef = React.useRef(latestUserMsgId);
-    React.useEffect(() => {
-        if (latestUserMsgId && latestUserMsgId !== prevUserMsgIdRef.current) {
-            prevUserMsgIdRef.current = latestUserMsgId;
-            manuallyCollapsedRef.current.clear();
-            setCollapsedGroups((prev) => {
-                const next = new Set(prev);
-                for (const item of displayItemsRef.current) {
-                    if (isCollapsibleDisplayItem(item)) {
-                        next.add(item.id);
-                    }
-                }
-                return next;
-            });
-        }
-    }, [latestUserMsgId]);
 
     const handleToggleGroup = useCallback((groupId: string) => {
         setCollapsedGroups((prev) => {
@@ -260,6 +215,25 @@ const ChatListInternal = React.memo((props: {
         headerBackdropVisibleRef.current = nextVisible;
         props.onHeaderBackdropVisibilityChange(nextVisible);
     }, [props.headerOverlayHeight, props.onHeaderBackdropVisibilityChange, props.topContentInset]);
+
+    // The message action button opens fork-from-this-message. It uses the same canFork gate as
+    // the rest of the fork affordances: ridden by the expResumeSession
+    // experiments toggle, requires a Claude session with claudeSessionId
+    // and a machine that's online. Active OR inactive — fork works either
+    // way (the on-disk JSONL exists in both cases).
+    const { canFork } = useSessionQuickActions(session!, {});
+
+    const handleForkFromMessage = useCallback((messageId: string, rewindPointId: string | undefined, messageText: string) => {
+        Modal.show({
+            component: DuplicateSheet,
+            props: {
+                sessionId: props.sessionId,
+                initialRewindPointId: rewindPointId,
+                initialMessageText: messageText,
+                initialForkedFromMessageId: messageId,
+            },
+        } as any);
+    }, [props.sessionId]);
 
     React.useEffect(() => () => {
         if (headerBackdropVisibleRef.current) {
@@ -295,9 +269,10 @@ const ChatListInternal = React.memo((props: {
                 message={item.message}
                 metadata={props.metadata}
                 sessionId={props.sessionId}
+                onForkFromUserMessage={canFork ? handleForkFromMessage : undefined}
             />
         );
-    }, [props.metadata, props.sessionId, collapsedGroups, handleToggleGroup]);
+    }, [props.metadata, props.sessionId, canFork, handleForkFromMessage, collapsedGroups, handleToggleGroup]);
 
     // In inverted FlatList, offset 0 = latest messages (visual bottom).
     // Offset increases as user scrolls up to see older messages.

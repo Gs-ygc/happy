@@ -114,6 +114,7 @@ describe('session action shortcuts', () => {
         expect(Object.keys(SESSION_ACTION_SHORTCUTS)).toEqual([
             'details',
             'resume',
+            'restart-codex',
             'fork',
             'duplicate',
             'copy-metadata',
@@ -124,6 +125,7 @@ describe('session action shortcuts', () => {
 
     it('formats Mac and non-Mac shortcut chords', () => {
         expect(formatShortcutChord('meta', SESSION_ACTION_SHORTCUTS.details)).toBe('⌥⌘O');
+        expect(formatShortcutChord('meta', SESSION_ACTION_SHORTCUTS['restart-codex'])).toBe('⌥⇧⌘R');
         expect(formatShortcutChord('meta', SESSION_ACTION_SHORTCUTS['copy-metadata-and-logs'])).toBe('⌥⇧⌘M');
         expect(formatShortcutChord('meta', SESSION_ACTION_SHORTCUTS.archive)).toBe('⇧⌘A');
         expect(formatShortcutChord('control', SESSION_ACTION_SHORTCUTS.details)).toBe('Ctrl+Alt+O');

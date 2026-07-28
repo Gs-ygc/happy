@@ -15,7 +15,7 @@ import { PermissionFooter } from './PermissionFooter';
 import { parseToolUseError } from '@/utils/toolErrorParser';
 import { formatMCPTitle } from './views/MCPToolView';
 import { t } from '@/text';
-import { getTerminalToolCommand, shouldRenderToolCardHeader } from '@/utils/toolDisplay';
+import { getTerminalToolCommand, getTerminalToolOutput, isTerminalToolName, shouldRenderToolCardHeader } from '@/utils/toolDisplay';
 
 interface ToolViewProps {
     metadata: Metadata | null;
@@ -166,6 +166,10 @@ export const ToolView = React.memo<ToolViewProps>((props) => {
 
     const terminalCommand = getTerminalToolCommand(tool);
     const isCompactTerminalTool = terminalCommand !== null;
+    const terminalOutput = isTerminalToolName(tool.name) ? getTerminalToolOutput(tool) : null;
+    const terminalOutputText = terminalOutput
+        ? [terminalOutput.stdout, terminalOutput.stderr, terminalOutput.error].filter(Boolean).join('\n')
+        : null;
     const isInlineCodexPatch = Platform.OS === 'web' && tool.name === 'CodexPatch';
     const renderCardHeader = shouldRenderToolCardHeader(tool.name, Platform.OS);
     const renderPermissionFooter = () => (
@@ -231,6 +235,12 @@ export const ToolView = React.memo<ToolViewProps>((props) => {
                         {renderHeaderContent()}
                     </View>
                 )
+            ) : null}
+
+            {terminalOutputText ? (
+                <View style={styles.compactOutput}>
+                    <CodeView code={terminalOutputText} maxHeight={240} />
+                </View>
             ) : null}
 
             {/* Content area - either custom children or tool-specific view */}
@@ -338,6 +348,11 @@ const styles = StyleSheet.create((theme) => ({
         paddingVertical: 3,
         borderRadius: 4,
         backgroundColor: 'transparent',
+    },
+    compactOutput: {
+        marginHorizontal: 8,
+        marginTop: 4,
+        marginBottom: 6,
     },
     headerLeft: {
         flexDirection: 'row',
