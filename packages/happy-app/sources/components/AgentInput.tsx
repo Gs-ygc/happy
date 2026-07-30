@@ -1461,13 +1461,10 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                                 ]}
                                             />
                                         ) : props.onMicPress && !props.isMicActive ? (
-                                            <Image
-                                                source={require('@/assets/images/icon-voice-white.png')}
-                                                style={{
-                                                    width: 24,
-                                                    height: 24,
-                                                }}
-                                                tintColor={theme.colors.button.primary.tint}
+                                            <Ionicons
+                                                name="mic-outline"
+                                                size={18}
+                                                color={theme.colors.button.primary.tint}
                                             />
                                         ) : (
                                             <Octicons

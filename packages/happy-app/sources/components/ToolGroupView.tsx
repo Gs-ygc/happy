@@ -259,6 +259,7 @@ function CollapseHeader(props: {
             style={({ pressed }) => [
                 styles.header,
                 pressed && styles.headerPressed,
+            !props.expanded && styles.headerCollapsed,
             ]}
         >
             {content}
@@ -281,7 +282,8 @@ function ToolGroupMessageRow(props: {
         );
     }
 
-    const shouldRenderFullTool = props.message.tool.permission?.status === 'pending'
+    const hasResult = props.message.tool.state === "completed" && props.message.tool.result != null;
+    const shouldRenderFullTool = hasResult || props.message.tool.permission?.status === 'pending'
         || props.message.tool.name === 'AskUserQuestion'
         || isTerminalToolName(props.message.tool.name);
     if (shouldRenderFullTool) {
@@ -458,6 +460,7 @@ const styles = StyleSheet.create((theme) => ({
     headerPressed: {
         opacity: 0.6,
     },
+    headerCollapsed: { backgroundColor: theme.colors.surfaceHigh, borderRadius: 6, },
     headerIcon: {
         width: 14,
         height: 18,

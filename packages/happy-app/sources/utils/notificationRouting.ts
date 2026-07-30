@@ -77,5 +77,11 @@ export function getSessionRouteFromNotificationData(data: unknown): `/session/${
 
 export function getSessionRouteFromNotificationResponse(response: unknown): `/session/${string}` | null {
     const contentData = getObjectValue(getObjectValue(getObjectValue(response, 'notification'), 'request'), 'content');
-    return getSessionRouteFromNotificationData(getObjectValue(contentData, 'data'));
+    const primaryRoute = getSessionRouteFromNotificationData(getObjectValue(contentData, 'data'));
+    if (primaryRoute) return primaryRoute;
+    const contentRoute = getSessionRouteFromNotificationData(contentData);
+    if (contentRoute) return contentRoute;
+    const directRoute = getSessionRouteFromNotificationData(response);
+    if (directRoute) return directRoute;
+    return null;
 }
