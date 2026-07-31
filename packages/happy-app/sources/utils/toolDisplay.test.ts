@@ -24,6 +24,7 @@ function tool(name: string, input: unknown): ToolCall {
 describe('terminal tool display helpers', () => {
     it('detects command-like terminal tools', () => {
         expect(isTerminalToolName('Bash')).toBe(true);
+        expect(isTerminalToolName('exec_command')).toBe(true);
         expect(isTerminalToolName('CodexBash')).toBe(true);
         expect(isTerminalToolName('GeminiBash')).toBe(true);
         expect(isTerminalToolName('execute')).toBe(true);
@@ -32,6 +33,7 @@ describe('terminal tool display helpers', () => {
 
     it('extracts one-line command summaries from shell tools', () => {
         expect(getTerminalToolCommand(tool('Bash', { command: 'pnpm test' }))).toBe('pnpm test');
+        expect(getTerminalToolCommand(tool('exec_command', { cmd: 'echo hello' }))).toBe('echo hello');
 
         expect(getTerminalToolCommand(tool(
             'CodexBash',

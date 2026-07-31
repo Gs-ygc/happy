@@ -101,9 +101,10 @@ export interface SessionRowData {
     completedTodosCount: number;
     totalTodosCount: number;
     hasUnread: boolean;
+    isPinned: boolean;
 }
 
-function buildSessionRowData(session: Session, unreadSessionIds?: Set<string>): SessionRowData {
+function buildSessionRowData(session: Session, unreadSessionIds?: Set<string>, pinnedSessionIds?: Set<string>): SessionRowData {
     const isOnline = session.presence === "online";
     const hasPermissions = !!(session.agentState?.requests && Object.keys(session.agentState.requests).length > 0);
 
@@ -143,6 +144,7 @@ function buildSessionRowData(session: Session, unreadSessionIds?: Set<string>): 
         completedTodosCount: session.todos?.filter(todo => todo.status === 'completed').length ?? 0,
         totalTodosCount: session.todos?.length ?? 0,
         hasUnread: unreadSessionIds?.has(session.id) ?? false,
+        isPinned: pinnedSessionIds?.has(session.id) ?? false,
     };
 }
 
@@ -248,6 +250,7 @@ interface StorageState {
 function buildSessionListViewData(
     sessions: Record<string, Session>,
     unreadSessionIds?: Set<string>,
+    pinnedSessionIdList?: readonly string[],
 ): SessionListViewItem[] {
     // Separate active and inactive sessions
     const activeSessions: Session[] = [];
@@ -261,19 +264,42 @@ function buildSessionListViewData(
         }
     });
 
-    // Sort by last activity or creation date (newest first), per user setting — matches applySessions behavior
+    // Get pinned session IDs from local settings
+    const pinnedArray = pinnedSessionIdList ?? storage.getState().localSettings.pinnedSessionIds ?? [];
+    const pinnedSessionIds = new Set(pinnedArray);
+
+    // Sort key (newest first)
     const sortKey = storage.getState().settings.sortSessionsByActivity
         ? (s: Session) => s.updatedAt
         : (s: Session) => s.createdAt;
-    activeSessions.sort((a, b) => sortKey(b) - sortKey(a));
-    inactiveSessions.sort((a, b) => sortKey(b) - sortKey(a));
 
+    // Sort comparator: pinned first (newest pin first), then unread, then by date (newest first)
+    const pinnedIndex = new Map<string, number>();
+    pinnedArray.forEach((id, idx) => pinnedIndex.set(id, idx));
+
+    const sessionComparator = (a: Session, b: Session) => {
+        const aPinIdx = pinnedIndex.has(a.id) ? pinnedIndex.get(a.id)! : -1;
+        const bPinIdx = pinnedIndex.has(b.id) ? pinnedIndex.get(b.id)! : -1;
+        // Pinned items first, sorted by pin order (lower index = newer pin = higher priority)
+        if (aPinIdx >= 0 && bPinIdx >= 0) return aPinIdx - bPinIdx;
+        if (aPinIdx >= 0) return -1;
+        if (bPinIdx >= 0) return 1;
+
+        const aUnread = unreadSessionIds?.has(a.id) ? 1 : 0;
+        const bUnread = unreadSessionIds?.has(b.id) ? 1 : 0;
+        if (aUnread !== bUnread) return bUnread - aUnread;
+
+        return sortKey(b) - sortKey(a);
+    };
+
+    activeSessions.sort(sessionComparator);
+    inactiveSessions.sort(sessionComparator);
     // Build unified list view data
     const listData: SessionListViewItem[] = [];
 
     // Add active sessions as a single item at the top (if any)
     if (activeSessions.length > 0) {
-        listData.push({ type: 'active-sessions', sessions: activeSessions.map(s => buildSessionRowData(s, unreadSessionIds)) });
+        listData.push({ type: 'active-sessions', sessions: activeSessions.map(s => buildSessionRowData(s, unreadSessionIds, pinnedSessionIds)) });
     }
 
     // Group inactive sessions by date
@@ -307,7 +333,7 @@ function buildSessionListViewData(
 
                 listData.push({ type: 'header', title: headerTitle });
                 currentDateGroup.forEach(sess => {
-                    listData.push({ type: 'session', session: buildSessionRowData(sess, unreadSessionIds) });
+                    listData.push({ type: 'session', session: buildSessionRowData(sess, unreadSessionIds, pinnedSessionIds) });
                 });
             }
 
@@ -337,7 +363,7 @@ function buildSessionListViewData(
 
         listData.push({ type: 'header', title: headerTitle });
         currentDateGroup.forEach(sess => {
-            listData.push({ type: 'session', session: buildSessionRowData(sess, unreadSessionIds) });
+            listData.push({ type: 'session', session: buildSessionRowData(sess, unreadSessionIds, pinnedSessionIds) });
         });
     }
 
@@ -686,20 +712,25 @@ export const storage = create<StorageState>()((set, get) => {
                 // IMPORTANT: We extract latestUsage from the mutable reducerState and copy it to the Session object
                 // This ensures latestUsage is available immediately on load, even before messages are fully loaded
                 let updatedSessions = state.sessions;
-                const needsUpdate = (reducerResult.todos !== undefined || existingSession.reducerState.latestUsage || shouldEnterPlanMode) && session;
+                const nextUsage = existingSession.reducerState.latestUsage;
+                const todosChanged = reducerResult.todos !== undefined
+                    && !equal(session?.todos, reducerResult.todos);
+                const usageChanged = nextUsage !== undefined
+                    && !equal(session?.latestUsage, nextUsage);
+                const planModeChanged = shouldEnterPlanMode
+                    && session?.permissionMode !== 'plan';
+                const needsUpdate = session && (todosChanged || usageChanged || planModeChanged);
 
                 if (needsUpdate) {
                     updatedSessions = {
                         ...state.sessions,
                         [sessionId]: {
                             ...session,
-                            ...(reducerResult.todos !== undefined && { todos: reducerResult.todos }),
+                            ...(todosChanged && { todos: reducerResult.todos }),
                             // Copy latestUsage from reducerState to make it immediately available
-                            latestUsage: existingSession.reducerState.latestUsage ? {
-                                ...existingSession.reducerState.latestUsage
-                            } : session.latestUsage,
+                            ...(usageChanged && nextUsage ? { latestUsage: { ...nextUsage } } : {}),
                             // Auto-switch to plan mode when EnterPlanMode tool call is detected
-                            ...(shouldEnterPlanMode && { permissionMode: 'plan' })
+                            ...(planModeChanged && { permissionMode: 'plan' })
                         }
                     };
                 }
@@ -855,9 +886,17 @@ export const storage = create<StorageState>()((set, get) => {
         applyLocalSettings: (delta: Partial<LocalSettings>) => set((state) => {
             const updatedLocalSettings = applyLocalSettings(state.localSettings, delta);
             saveLocalSettings(updatedLocalSettings);
+            const pinnedSessionsChanged = delta.pinnedSessionIds !== undefined;
             return {
                 ...state,
-                localSettings: updatedLocalSettings
+                localSettings: updatedLocalSettings,
+                ...(pinnedSessionsChanged ? {
+                    sessionListViewData: buildSessionListViewData(
+                        state.sessions,
+                        state.unreadSessionIds,
+                        updatedLocalSettings.pinnedSessionIds,
+                    ),
+                } : {}),
             };
         }),
         applyPurchases: (customerInfo: CustomerInfo) => set((state) => {
@@ -1010,7 +1049,7 @@ export const storage = create<StorageState>()((set, get) => {
             return {
                 ...state,
                 sessions: updatedSessions,
-                sessionListViewData: buildSessionListViewData(updatedSessions)
+                sessionListViewData: buildSessionListViewData(updatedSessions, state.unreadSessionIds)
             };
         }),
         // Permission / model / effort picks are local mirrors of synced session
@@ -1059,7 +1098,8 @@ export const storage = create<StorageState>()((set, get) => {
 
             // Rebuild sessionListViewData to reflect machine changes
             const sessionListViewData = buildSessionListViewData(
-                state.sessions
+                state.sessions,
+                state.unreadSessionIds,
             );
 
             return {
@@ -1076,7 +1116,7 @@ export const storage = create<StorageState>()((set, get) => {
             return {
                 ...state,
                 machines: remaining,
-                sessionListViewData: buildSessionListViewData(state.sessions)
+                sessionListViewData: buildSessionListViewData(state.sessions, state.unreadSessionIds)
             };
         }),
         // Artifact methods
@@ -1139,7 +1179,7 @@ export const storage = create<StorageState>()((set, get) => {
             saveSessionDrafts(drafts);
             
             // Rebuild sessionListViewData without the deleted session
-            const sessionListViewData = buildSessionListViewData(remainingSessions);
+            const sessionListViewData = buildSessionListViewData(remainingSessions, state.unreadSessionIds);
             
             return {
                 ...state,
@@ -1337,6 +1377,19 @@ export function useSessionMessages(sessionId: string): {
     }));
 }
 
+export function useSessionMessageStatus(sessionId: string): {
+    hasMessages: boolean,
+    isLoaded: boolean,
+} {
+    return storage(useShallow((state) => {
+        const session = state.sessionMessages[sessionId];
+        return {
+            hasMessages: (session?.messages.length ?? 0) > 0,
+            isLoaded: session?.isLoaded ?? false,
+        };
+    }));
+}
+
 export function useMessage(sessionId: string, messageId: string): Message | null {
     return storage(useShallow((state) => {
         const session = state.sessionMessages[sessionId];
@@ -1375,7 +1428,23 @@ export function useAllMachines(options?: { includeOffline?: boolean }): Machine[
     const includeOffline = options?.includeOffline ?? false;
     return storage(useShallow((state) => {
         if (!state.isDataReady) return [];
-        const machines = Object.values(state.machines).sort((a, b) => b.createdAt - a.createdAt);
+        const pinnedArray = state.localSettings.pinnedMachineIds ?? [];
+        const pinnedIndex = new Map<string, number>();
+        pinnedArray.forEach((id, idx) => pinnedIndex.set(id, idx));
+        const machines = Object.values(state.machines).sort((a, b) => {
+            // Pinned first, sorted by pin order (newest pin first)
+            const aPinIdx = pinnedIndex.has(a.id) ? pinnedIndex.get(a.id)! : -1;
+            const bPinIdx = pinnedIndex.has(b.id) ? pinnedIndex.get(b.id)! : -1;
+            if (aPinIdx >= 0 && bPinIdx >= 0) return aPinIdx - bPinIdx;
+            if (aPinIdx >= 0) return -1;
+            if (bPinIdx >= 0) return 1;
+            // Online first
+            const aOnline = a.active ? 1 : 0;
+            const bOnline = b.active ? 1 : 0;
+            if (aOnline !== bOnline) return bOnline - aOnline;
+            // Most recently seen first
+            return b.activeAt - a.activeAt;
+        });
         return includeOffline ? machines : machines.filter((v) => v.active);
     }));
 }

@@ -229,6 +229,8 @@ export const ca: TranslationStructure = {
         commandPaletteDisabled: 'Accés ràpid a comandes desactivat',
         markdownCopyV2: 'Markdown Copy v2',
         markdownCopyV2Subtitle: 'Pulsació llarga obre modal de còpia',
+        showThinking: 'Mostra el raonament',
+        showThinkingSubtitle: 'Mostra el raonament de l’agent en blocs plegats',
         hideInactiveSessions: 'Amaga les sessions inactives',
         hideInactiveSessionsSubtitle: 'Mostra només els xats actius a la llista',
         groupToolCalls: 'Agrupa les crides a eines',
@@ -309,6 +311,9 @@ export const ca: TranslationStructure = {
     },
 
     session: {
+        pin: "Pin to top",
+        unpin: "Unpin",
+        renameEmpty: 'Cal un nom de sessió.',
         inputPlaceholder: 'Escriu un missatge...',
         inactiveArchived: 'Aquesta sessió està inactiva.',
         resumeFromTerminal: 'Per reprendre-la des del terminal:',

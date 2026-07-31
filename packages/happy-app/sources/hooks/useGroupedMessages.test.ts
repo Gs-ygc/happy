@@ -328,6 +328,30 @@ describe('useGroupedMessages', () => {
         expect(items.map((item) => item.id)).toEqual(['agent-final', 'user']);
     });
 
+    it('keeps thinking messages when explicitly enabled', () => {
+        const messages: Message[] = [
+            {
+                kind: 'agent-text',
+                id: 'thinking',
+                localId: null,
+                createdAt: 2,
+                text: 'checking',
+                isThinking: true,
+            },
+            {
+                kind: 'user-text',
+                id: 'user',
+                localId: null,
+                createdAt: 1,
+                text: 'inspect this',
+            },
+        ];
+
+        expect(groupMessagesForDisplay(messages, true).map((item) => item.id)).toEqual(['user']);
+        expect(groupMessagesForDisplay(messages, true, { showThinking: true }).map((item) => item.id))
+            .toEqual(['thinking', 'user']);
+    });
+
     it('can collapse single standalone tool calls for nested work details', () => {
         const messages: Message[] = [
             toolMessage('tool-only', 2),

@@ -89,6 +89,7 @@ export const SettingsView = React.memo(function SettingsView() {
     const experiments = useSetting('experiments');
     const isCustomServer = isUsingCustomServer();
     const [showOfflineMachines, setShowOfflineMachines] = React.useState(false);
+    const [pinnedMachineIds, setPinnedMachineIds] = useLocalSettingMutable("pinnedMachineIds");
     const allMachinesWithOffline = useAllMachines({ includeOffline: true });
     const offlineMachineCount = React.useMemo(
         () => allMachinesWithOffline.filter(m => !isMachineOnline(m)).length,
@@ -335,6 +336,27 @@ export const SettingsView = React.memo(function SettingsView() {
                                 key={machine.id}
                                 title={title}
                                 subtitle={subtitle}
+                                rightElement={
+                                    <Pressable
+                                        onPress={(e: any) => {
+                                            e.stopPropagation?.();
+                                            const isPinned = pinnedMachineIds.includes(machine.id);
+                                            if (isPinned) {
+                                                setPinnedMachineIds(pinnedMachineIds.filter(id => id !== machine.id));
+                                            } else {
+                                                setPinnedMachineIds([machine.id, ...pinnedMachineIds]);
+                                            }
+                                        }}
+                                        hitSlop={8}
+                                        style={{ padding: 4 }}
+                                    >
+                                        <Ionicons
+                                            name={pinnedMachineIds.includes(machine.id) ? "pin" : "pin-outline"}
+                                            size={16}
+                                            color={pinnedMachineIds.includes(machine.id) ? theme.colors.textLink : theme.colors.textSecondary}
+                                        />
+                                    </Pressable>
+                                }
                                 icon={
                                     <Ionicons
                                         name="desktop-outline"

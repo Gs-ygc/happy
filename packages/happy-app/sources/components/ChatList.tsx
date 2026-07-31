@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useSession, useSessionMessages, useSetting } from "@/sync/storage";
+import { useLocalSetting, useSession, useSessionMessages, useSetting } from "@/sync/storage";
 import { sync } from '@/sync/sync';
 import { ActivityIndicator, FlatList, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, View } from 'react-native';
 import { useCallback } from 'react';
@@ -98,13 +98,14 @@ const ChatListInternal = React.memo((props: {
     // Collapse agent work between a user prompt and the final answer.
     // Nested tool groups remain expandable inside the work block.
     const groupToolCalls = useSetting('groupToolCalls');
+    const showThinking = useLocalSetting('showThinking');
     const hasPendingPermission = Boolean(
         session?.agentState?.requests && Object.keys(session.agentState.requests).length > 0,
     );
     const collapseCurrentTurn = session?.thinking !== true && !hasPendingPermission;
     const groupingOptions = React.useMemo(
-        () => ({ collapseCurrentTurn }),
-        [collapseCurrentTurn],
+        () => ({ collapseCurrentTurn, showThinking }),
+        [collapseCurrentTurn, showThinking],
     );
     const displayItems = useGroupedMessages(props.messages, groupToolCalls, groupingOptions);
 
@@ -309,6 +310,11 @@ const ChatListInternal = React.memo((props: {
                 ListFooterComponent={<ListHeader isLoadingOlder={props.isLoadingOlder} />}
                 onEndReached={handleLoadOlder}
                 onEndReachedThreshold={0.5}
+                initialNumToRender={10}
+                maxToRenderPerBatch={6}
+                updateCellsBatchingPeriod={32}
+                windowSize={7}
+                removeClippedSubviews={Platform.OS === 'android'}
             />
             {showScrollButton && (
                 <View style={styles.scrollButtonContainer}>

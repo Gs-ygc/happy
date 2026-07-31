@@ -3,7 +3,7 @@ import { View, Pressable, Platform } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Text } from '@/components/StyledText';
 import { Machine } from '@/sync/storageTypes';
-import { SessionRowData } from '@/sync/storage';
+import { SessionRowData, useLocalSettingMutable } from '@/sync/storage';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { type SessionState, formatPathRelativeToHome, vibingMessages, formatLastSeen } from '@/utils/sessionUtils';
 import { Avatar } from './Avatar';
@@ -142,25 +142,46 @@ const SectionHeader = React.memo(({ session, displayPath }: { session: SessionRo
     );
 });
 
-// Full-width separator between machine groups: ——— 🖥 name ———
+// Full-width separator between machine groups.
 const MachineSeparator = React.memo(({ machineName, machineId }: { machineName: string; machineId: string }) => {
     const styles = stylesheet;
     const { theme } = useUnistyles();
     const router = useRouter();
+    const [pinnedIds, setPinnedIds] = useLocalSettingMutable('pinnedMachineIds');
+    const isPinned = pinnedIds.includes(machineId);
 
     const handlePress = React.useCallback(() => {
         router.navigate(`/machine/${machineId}` as any);
     }, [router, machineId]);
 
+    const togglePin = React.useCallback((e: any) => {
+        e.stopPropagation?.();
+        e.preventDefault?.();
+        if (isPinned) {
+            setPinnedIds(pinnedIds.filter(id => id !== machineId));
+        } else {
+            setPinnedIds([machineId, ...pinnedIds]);
+        }
+    }, [isPinned, pinnedIds, machineId, setPinnedIds]);
+
     return (
-        <Pressable onPress={handlePress} style={styles.machineSeparator} hitSlop={{ top: 8, bottom: 8 }}>
+        <View style={styles.machineSeparator}>
             <View style={styles.machineSeparatorLine} />
             <Ionicons name="desktop-outline" size={11} color={theme.colors.textSecondary} style={{ marginHorizontal: 6 }} />
-            <Text style={styles.machineSeparatorText} numberOfLines={1}>
-                {machineName}
-            </Text>
+            <Pressable onPress={handlePress} style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
+                <Text style={styles.machineSeparatorText} numberOfLines={1}>
+                    {machineName}
+                </Text>
+            </Pressable>
+            <Pressable onPress={togglePin} hitSlop={8} style={{ padding: 2, marginLeft: 4 }}>
+                <Ionicons
+                    name={isPinned ? 'pin' : 'pin-outline'}
+                    size={11}
+                    color={isPinned ? theme.colors.textLink : theme.colors.textSecondary}
+                />
+            </Pressable>
             <View style={styles.machineSeparatorLine} />
-        </Pressable>
+        </View>
     );
 });
 
@@ -212,19 +233,20 @@ export function ActiveSessionsGroupCompact({ sessions, selectedSessionId }: Acti
             projectGroup.sessions.push(session);
         });
 
-        // Sort sessions within each project group
-        byMachine.forEach(mg => {
-            mg.projects.forEach(pg => {
-                pg.sessions.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-            });
+        // Sessions arrive in pin/unread/activity order. Preserve that order
+        // while grouping so pinning is not overwritten by createdAt.
+
+        // useAllMachines already applies the user's pin order. Preserve that
+        // order here and put unknown machines last.
+        const machineOrder = new Map(machines.map((machine, index) => [machine.id, index]));
+        const sorted = Array.from(byMachine.values()).sort((a, b) => {
+            const aIndex = machineOrder.get(a.machineId) ?? Number.MAX_SAFE_INTEGER;
+            const bIndex = machineOrder.get(b.machineId) ?? Number.MAX_SAFE_INTEGER;
+            return aIndex - bIndex || a.machineName.localeCompare(b.machineName);
         });
 
-        const sorted = Array.from(byMachine.values()).sort((a, b) =>
-            a.machineName.localeCompare(b.machineName)
-        );
-
         return { machineGroups: sorted, hasMultipleMachines: byMachine.size > 1 };
-    }, [sessions, machinesMap]);
+    }, [sessions, machines, machinesMap]);
 
     return (
         <View style={styles.container}>

@@ -2,16 +2,16 @@ import * as React from 'react';
 import { useHappyAction } from '@/hooks/useHappyAction';
 import { useNavigateToSession } from '@/hooks/useNavigateToSession';
 import { Modal } from '@/modal';
-import { machineResumeSession, sessionArchive, sessionKill, sessionRestartCodex, sessionSetAgentModes, forkAndSpawn, type ForkSource } from '@/sync/ops';
+import { machineResumeSession, sessionArchive, sessionKill, sessionRename, sessionRestartCodex, sessionSetAgentModes, forkAndSpawn, type ForkSource } from '@/sync/ops';
 import { maybeCleanupWorktree } from '@/hooks/useWorktreeCleanup';
-import { storage, useLocalSetting, useMachine, useSetting } from '@/sync/storage';
+import { storage, useLocalSetting, useLocalSettingMutable, useMachine, useSetting } from '@/sync/storage';
 import { Machine, Session } from '@/sync/storageTypes';
 import { sync } from '@/sync/sync';
 import { resolveMessageModeMeta } from '@/sync/messageMeta';
 import { t } from '@/text';
 import { HappyError } from '@/utils/errors';
 import { copySessionMetadataToClipboard, copySessionMetadataAndLogsToClipboard } from '@/utils/copySessionMetadataToClipboard';
-import { useSessionStatus } from '@/utils/sessionUtils';
+import { getSessionName, useSessionStatus } from '@/utils/sessionUtils';
 import { isMachineOnline } from '@/utils/machineUtils';
 import { getSessionForkSource } from '@/utils/sessionFork';
 import { useRouter } from 'expo-router';
@@ -122,6 +122,15 @@ export function useSessionQuickActions(
     const machine = useMachine(machineId);
     const devModeEnabled = useLocalSetting('devModeEnabled');
     const expResumeSession = useSetting('expResumeSession');
+    const [pinnedSessionIds, setPinnedSessionIds] = useLocalSettingMutable("pinnedSessionIds");
+    const isPinned = pinnedSessionIds.includes(session.id);
+    const togglePin = React.useCallback(() => {
+        if (isPinned) {
+            setPinnedSessionIds(pinnedSessionIds.filter(id => id !== session.id));
+        } else {
+            setPinnedSessionIds([session.id, ...pinnedSessionIds]);
+        }
+    }, [isPinned, pinnedSessionIds, session.id, setPinnedSessionIds]);
     const resumeAvailability = React.useMemo(
         () => expResumeSession ? getResumeAvailability(session, machine, sessionStatus.isConnected) : { canResume: false, canShowResume: false, subtitle: '', message: '' },
         [machine, session, sessionStatus.isConnected, expResumeSession],
@@ -156,6 +165,30 @@ export function useSessionQuickActions(
     const openDetails = React.useCallback(() => {
         router.push(`/session/${session.id}/info`);
     }, [router, session.id]);
+
+    const renameSession = React.useCallback(() => {
+        void (async () => {
+            const value = await Modal.prompt(t('common.rename'), t('session.newChat'), {
+                defaultValue: getSessionName(session),
+                placeholder: t('session.newChat'),
+                confirmText: t('common.save'),
+            });
+            if (value === null) {
+                return;
+            }
+            const name = value.trim();
+            if (!name) {
+                Modal.alert(t('common.error'), t('session.renameEmpty'));
+                return;
+            }
+            try {
+                await sessionRename(session.id, name);
+                await sync.refreshSessions();
+            } catch (error) {
+                Modal.alert(t('common.error'), error instanceof Error ? error.message : String(error));
+            }
+        })();
+    }, [session]);
 
     const copySessionMetadata = React.useCallback(() => {
         void (async () => {
@@ -289,6 +322,8 @@ export function useSessionQuickActions(
 
     const actionItems = React.useMemo<SessionActionItem[]>(() => {
         const items: SessionActionItem[] = [
+            { id: "pin", icon: isPinned ? "pin" : "pin-outline", label: isPinned ? t("session.unpin") : t("session.pin"), onPress: togglePin },
+            { id: 'rename', icon: 'create-outline', label: t('common.rename'), onPress: renameSession },
             { id: 'details', icon: 'information-circle-outline', label: t('profile.details'), onPress: openDetails },
         ];
 
@@ -322,10 +357,13 @@ export function useSessionQuickActions(
         copySessionMetadataAndLogs,
         forkSource,
         forkSession,
+        isPinned,
+        togglePin,
         openDetails,
         openDuplicateSheet,
         resumeAvailability.canShowResume,
         resumeSession,
+        renameSession,
         restartCodex,
     ]);
 
@@ -353,6 +391,8 @@ export function useSessionQuickActions(
         copySessionMetadata,
         copySessionMetadataAndLogs,
         forkSession,
+        isPinned,
+        togglePin,
         forking,
         openDetails,
         openDuplicateSheet,

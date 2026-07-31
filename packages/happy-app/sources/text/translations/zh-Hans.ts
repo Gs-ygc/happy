@@ -230,6 +230,8 @@ export const zhHans: TranslationStructure = {
         commandPaletteDisabled: '快速命令访问已禁用',
         markdownCopyV2: 'Markdown 复制 v2',
         markdownCopyV2Subtitle: '长按打开复制模态框',
+        showThinking: '显示思考过程',
+        showThinkingSubtitle: '以默认折叠的区块显示智能体思考过程',
         hideInactiveSessions: '隐藏非活跃会话',
         hideInactiveSessionsSubtitle: '仅在列表中显示活跃的聊天',
         groupToolCalls: '分组工具调用',
@@ -310,6 +312,9 @@ export const zhHans: TranslationStructure = {
     },
 
     session: {
+        pin: '置顶',
+        unpin: '取消置顶',
+        renameEmpty: '请输入会话名称。',
         inputPlaceholder: '输入消息...',
         inactiveArchived: '此会话处于非活动状态。',
         resumeFromTerminal: '要从终端恢复它：',

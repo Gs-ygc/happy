@@ -230,6 +230,8 @@ export const ja: TranslationStructure = {
         commandPaletteDisabled: 'クイックコマンドアクセスは無効',
         markdownCopyV2: 'Markdownコピー v2',
         markdownCopyV2Subtitle: '長押しでコピーモーダルを開く',
+        showThinking: '思考過程を表示',
+        showThinkingSubtitle: 'エージェントの思考過程を折りたたんで表示します',
         hideInactiveSessions: '非アクティブセッションを非表示',
         hideInactiveSessionsSubtitle: 'アクティブなチャットのみをリストに表示',
         groupToolCalls: 'ツール呼び出しをグループ化',
@@ -310,6 +312,9 @@ export const ja: TranslationStructure = {
     },
 
     session: {
+        pin: "Pin to top",
+        unpin: "Unpin",
+        renameEmpty: 'セッション名を入力してください。',
         inputPlaceholder: 'メッセージを入力...',
         inactiveArchived: 'このセッションは非アクティブです。',
         resumeFromTerminal: 'ターミナルから再開するには:',

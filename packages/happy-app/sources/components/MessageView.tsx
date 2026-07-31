@@ -9,8 +9,9 @@ import { Metadata } from "@/sync/storageTypes";
 import { ToolView } from "./tools/ToolView";
 import { AgentEvent } from "@/sync/typesRaw";
 import { sync } from '@/sync/sync';
-import { useSetting } from '@/sync/storage';
+import { useSetting, useLocalSetting } from '@/sync/storage';
 import { Option } from './markdown/MarkdownView';
+import * as Clipboard from 'expo-clipboard';
 import { layout } from "./layout";
 import { parseLocalCommandMessage, isUserSlashCommandEcho } from './parseLocalCommandMessage';
 import { resolveUserMessageBubbleColor } from '@/utils/userMessageBubbleColor';
@@ -25,10 +26,7 @@ export const MessageView = React.memo((props: {
   onForkFromUserMessage?: (messageId: string, rewindPointId: string | undefined, messageText: string) => void;
 }) => {
   return (
-    <View
-      style={styles.messageContainer}
-      renderToHardwareTextureAndroid={Platform.OS !== 'web'}
-    >
+    <View style={styles.messageContainer}>
       <View style={styles.messageContent}>
         <RenderBlock
           message={props.message}
@@ -43,6 +41,46 @@ export const MessageView = React.memo((props: {
 });
 
 // RenderBlock function that dispatches to the correct component based on message kind
+function CopyButton({ text }: { text: string }) {
+    const { theme } = useUnistyles();
+    const [copied, setCopied] = React.useState(false);
+    const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    React.useEffect(() => () => {
+        if (timerRef.current) clearTimeout(timerRef.current);
+    }, []);
+
+    const handleCopy = React.useCallback(async () => {
+        try {
+            await Clipboard.setStringAsync(text);
+            setCopied(true);
+            if (timerRef.current) clearTimeout(timerRef.current);
+            timerRef.current = setTimeout(() => setCopied(false), 1600);
+        } catch (error) {
+            console.error("Failed to copy:", error);
+        }
+    }, [text]);
+
+    return (
+        <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={copied ? t("common.copied") : t("common.copy")}
+            onPress={handleCopy}
+            hitSlop={8}
+            style={({ pressed }) => [
+                styles.copyButton,
+                pressed && styles.copyButtonPressed,
+            ]}
+        >
+            <Ionicons
+                name={copied ? "checkmark" : "copy-outline"}
+                size={14}
+                color={copied ? theme.colors.success : theme.colors.textSecondary}
+            />
+        </Pressable>
+    );
+}
+
 function RenderBlock(props: {
   message: Message;
   metadata: Metadata | null;
@@ -194,8 +232,49 @@ function UserTextBlock(props: {
           <MarkdownView markdown={parsed.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
         </View>
       </View>
+      <View style={styles.copyRow}>
+        <CopyButton text={parsed.text} />
+      </View>
     </View>
   );
+}
+
+function ThinkingBlock({ text }: { text: string }) {
+    const { theme } = useUnistyles();
+    const [expanded, setExpanded] = React.useState(false);
+    const displayText = text.replace(/^\*|\*$/g, "");
+    const toggleExpanded = React.useCallback(() => {
+        setExpanded((current) => !current);
+    }, []);
+
+    return (
+        <View style={styles.agentMessageContainer}>
+            <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded }}
+                onPress={toggleExpanded}
+                style={({ pressed }) => [
+                    styles.thinkingHeader,
+                    pressed && { opacity: 0.7 },
+                ]}
+            >
+                <Ionicons
+                    name={expanded ? "chevron-down" : "chevron-forward"}
+                    size={14}
+                    color={theme.colors.textSecondary}
+                />
+                <Ionicons name="bulb-outline" size={14} color={theme.colors.textSecondary} />
+                <Text style={styles.thinkingHeaderText} numberOfLines={1}>
+                    {t('sessionInfo.thinking')}
+                </Text>
+            </Pressable>
+            {expanded ? (
+                <View style={styles.thinkingContent}>
+                    <MarkdownView markdown={displayText} />
+                </View>
+            ) : null}
+        </View>
+    );
 }
 
 function AgentTextBlock(props: {
@@ -206,14 +285,19 @@ function AgentTextBlock(props: {
     sync.sendMessage(props.sessionId, option.title, { source: 'option' });
   }, [props.sessionId]);
 
-  // Hide thinking messages
-  if (props.message.isThinking) {
-    return null;
-  }
+  const showThinking = useLocalSetting('showThinking');
 
+  // Show thinking as a collapsed expandable block when enabled
+  if (props.message.isThinking) {
+    if (!showThinking) return null;
+    return <ThinkingBlock text={props.message.text} />;
+  }
   return (
     <View style={styles.agentMessageContainer}>
       <MarkdownView markdown={props.message.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+      <View style={styles.copyRow}>
+        <CopyButton text={props.message.text} />
+      </View>
     </View>
   );
 }
@@ -377,6 +461,24 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: 16,
     maxWidth: '100%',
   },
+  thinkingHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: theme.colors.surfaceHigh,
+  },
+  thinkingHeaderText: {
+    color: theme.colors.textSecondary,
+    fontSize: 13,
+    flexShrink: 1,
+  },
+  thinkingContent: {
+    marginTop: 6,
+    paddingHorizontal: 4,
+  },
   agentEventContainer: {
     marginHorizontal: 8,
     alignItems: 'center',
@@ -394,5 +496,21 @@ const styles = StyleSheet.create((theme) => ({
   debugText: {
     color: theme.colors.agentEventText,
     fontSize: 12,
+  },
+  copyRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 2,
+  },
+  copyButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    opacity: 0.5,
+  },
+  copyButtonPressed: {
+    opacity: 0.9,
   },
 }));

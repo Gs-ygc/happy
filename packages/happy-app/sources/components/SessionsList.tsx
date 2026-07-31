@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVisibleSessionListViewData } from '@/hooks/useVisibleSessionListViewData';
 import { Typography } from '@/constants/Typography';
 import { StatusDot } from './StatusDot';
-import { StyleSheet } from 'react-native-unistyles';
+import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { useIsTablet } from '@/utils/responsive';
 import { requestReview } from '@/utils/requestReview';
 import { UpdateBanner } from './UpdateBanner';
@@ -19,9 +19,31 @@ import { layout } from './layout';
 import { useNavigateToSession } from '@/hooks/useNavigateToSession';
 import { SessionActionsAnchor, SessionActionsPopover } from './SessionActionsPopover';
 import { useSessionActionAlert } from '@/hooks/useSessionQuickActions';
-import { useSettingMutable } from '@/sync/storage';
+import { useSettingMutable, useLocalSettingMutable } from '@/sync/storage';
 import { t } from '@/text';
 import { ProviderIcon } from './ProviderIcon';
+
+function SessionPinButton({ sessionId, isPinned }: { sessionId: string; isPinned: boolean }) {
+    const { theme } = useUnistyles();
+    const [pinnedIds, setPinnedIds] = useLocalSettingMutable('pinnedSessionIds');
+    const toggle = React.useCallback((e: any) => {
+        e.stopPropagation?.();
+        if (isPinned) {
+            setPinnedIds(pinnedIds.filter(id => id !== sessionId));
+        } else {
+            setPinnedIds([sessionId, ...pinnedIds]);
+        }
+    }, [isPinned, pinnedIds, sessionId, setPinnedIds]);
+    return (
+        <Pressable onPress={toggle} hitSlop={8} style={{ padding: 4 }}>
+            <Ionicons
+                name={isPinned ? 'pin' : 'pin-outline'}
+                size={14}
+                color={isPinned ? theme.colors.textLink : theme.colors.textSecondary}
+            />
+        </Pressable>
+    );
+}
 
 const stylesheet = StyleSheet.create((theme) => ({
     container: {
@@ -432,6 +454,7 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
                     ]} numberOfLines={1}>
                         {session.name}
                     </Text>
+                    <SessionPinButton sessionId={session.id} isPinned={session.isPinned} />
                 </View>
 
                 {session.identityLine ? (

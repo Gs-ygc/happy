@@ -3,6 +3,7 @@ import { stringifyToolCommand } from './toolCommand';
 
 const TERMINAL_TOOL_NAMES = new Set([
     'Bash',
+    'exec_command',
     'CodexBash',
     'GeminiBash',
     'shell',
@@ -120,6 +121,15 @@ export function getToolSummaryDetail(tool: Pick<ToolCall, 'name' | 'input' | 'de
 export function getTerminalToolCommand(tool: Pick<ToolCall, 'name' | 'input'>): string | null {
     if (!isTerminalToolName(tool.name)) {
         return null;
+    }
+
+    // Handle exec_command format: { cmd: "command string" }
+    const cmdStr = tool.input?.cmd;
+    if (typeof cmdStr === "string") {
+        const trimmed = cmdStr.trim();
+        if (trimmed.length > 0) {
+            return trimmed;
+        }
     }
 
     const parsedCmd = tool.input?.parsed_cmd;

@@ -2,7 +2,6 @@ import { MarkdownSpan, parseMarkdown } from './parseMarkdown';
 import * as React from 'react';
 import { Image, Pressable, View, Platform } from 'react-native';
 import { HorizontalScrollView } from '../HorizontalScrollView';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../StyledText';
@@ -10,14 +9,13 @@ import { Typography } from '@/constants/Typography';
 import { SimpleSyntaxHighlighter } from '../SimpleSyntaxHighlighter';
 import { Modal } from '@/modal';
 import { useLocalSetting } from '@/sync/storage';
-import { storeTempText } from '@/sync/persistence';
-import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import * as WebBrowser from 'expo-web-browser';
 import { MermaidRenderer } from './MermaidRenderer';
 import { t } from '@/text';
 import { isHttpMarkdownLink } from './linkUtils';
 import { openExternalUrl } from '@/utils/openExternalUrl';
+import { TextSelectionModal } from './TextSelectionModal';
 
 // Option type for callback
 export type Option = {
@@ -38,7 +36,6 @@ export const MarkdownView = React.memo((props: {
     // the native copy modal come up at the same time as the long press handler is fired.
     const markdownCopyV2 = useLocalSetting('markdownCopyV2');
     const selectable = Platform.OS === 'web' || !markdownCopyV2;
-    const router = useRouter();
 
     const handleLinkPress = React.useCallback((url: string) => {
         if (!isHttpMarkdownLink(url)) {
@@ -49,14 +46,11 @@ export const MarkdownView = React.memo((props: {
     }, []);
 
     const handleLongPress = React.useCallback(() => {
-        try {
-            const textId = storeTempText(props.markdown);
-            router.push(`/text-selection?textId=${textId}`);
-        } catch (error) {
-            console.error('Error storing text for selection:', error);
-            Modal.alert('Error', 'Failed to open text selection. Please try again.');
-        }
-    }, [props.markdown, router]);
+        Modal.show({
+            component: TextSelectionModal,
+            props: { text: props.markdown },
+        });
+    }, [props.markdown]);
     const renderContent = () => {
         return (
             <View style={{ width: '100%' }}>
@@ -97,21 +91,14 @@ export const MarkdownView = React.memo((props: {
         return renderContent();
     }
     
-    // Use GestureDetector with LongPress gesture - it doesn't block pan gestures
-    // so horizontal scrolling in code blocks and tables still works
-    const longPressGesture = Gesture.LongPress()
-        .minDuration(500)
-        .onStart(() => {
-            handleLongPress();
-        })
-        .runOnJS(true);
-
     return (
-        <GestureDetector gesture={longPressGesture}>
-            <View style={{ width: '100%' }}>
-                {renderContent()}
-            </View>
-        </GestureDetector>
+        <Pressable
+            onLongPress={handleLongPress}
+            delayLongPress={500}
+            style={{ width: '100%' }}
+        >
+            {renderContent()}
+        </Pressable>
     );
 });
 

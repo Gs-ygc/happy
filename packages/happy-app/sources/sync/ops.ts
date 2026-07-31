@@ -6,7 +6,7 @@
 import { apiSocket } from './apiSocket';
 import { sync } from './sync';
 import { storage } from './storage';
-import type { MachineMetadata, SessionAgentModesPatch } from './storageTypes';
+import type { MachineMetadata, Metadata, SessionAgentModesPatch } from './storageTypes';
 import { markAgentModePushPending, clearAgentModePushPending, type AgentModeField } from './agentModesPending';
 import {
     isRigMetadata,
@@ -694,6 +694,63 @@ export function sessionSetAgentModes(sessionId: string, patch: SessionAgentModes
         .finally(() => {
             clearAgentModePushPending(sessionId, changedFields);
         });
+}
+
+/**
+ * Set the user-visible session title in encrypted metadata.
+ * The server uses optimistic metadata versions, so retry against the latest
+ * metadata when another client updates the session at the same time.
+ */
+export async function sessionRename(sessionId: string, name: string): Promise<void> {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+        throw new Error('Session name cannot be empty');
+    }
+
+    const encryption = sync.encryption.getSessionEncryption(sessionId);
+    const session = storage.getState().sessions[sessionId];
+    if (!encryption || !session?.metadata) {
+        throw new Error(`Session ${sessionId} is not ready for metadata updates`);
+    }
+
+    let currentVersion = session.metadataVersion;
+    let currentMetadata: Record<string, unknown> = {
+        ...session.metadata,
+        name: trimmedName,
+    };
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const encrypted = await encryption.encryptRaw(currentMetadata);
+        const result = await apiSocket.emitWithAck<{
+            result: 'success' | 'version-mismatch' | 'error';
+            version?: number;
+            metadata?: string;
+            message?: string;
+        }>('update-metadata', {
+            sid: sessionId,
+            metadata: encrypted,
+            expectedVersion: currentVersion,
+        });
+
+        if (result.result === 'success') {
+            return;
+        }
+        if (result.result === 'version-mismatch' && result.version !== undefined && result.metadata) {
+            currentVersion = result.version;
+            const latest = await encryption.decryptRaw(result.metadata);
+            if (!latest || typeof latest !== 'object') {
+                throw new Error('Failed to decrypt latest session metadata');
+            }
+            currentMetadata = {
+                ...(latest as Metadata),
+                name: trimmedName,
+            };
+            continue;
+        }
+        throw new Error(result.message || 'Failed to rename session');
+    }
+
+    throw new Error('Failed to rename session after metadata conflicts');
 }
 
 /**

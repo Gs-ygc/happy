@@ -13,6 +13,7 @@ export default function FeaturesSettingsScreen() {
     const [agentInputEnterToSend, setAgentInputEnterToSend] = useSettingMutable('agentInputEnterToSend');
     const [commandPaletteEnabled, setCommandPaletteEnabled] = useLocalSettingMutable('commandPaletteEnabled');
     const [markdownCopyV2, setMarkdownCopyV2] = useLocalSettingMutable('markdownCopyV2');
+    const [showThinking, setShowThinking] = useLocalSettingMutable('showThinking');
     const [hideInactiveSessions, setHideInactiveSessions] = useSettingMutable('hideInactiveSessions');
     const [expResumeSession, setExpResumeSession] = useSettingMutable('expResumeSession');
     const [fileDiffsSidebar, setFileDiffsSidebar] = useSettingMutable('fileDiffsSidebar');
@@ -90,6 +91,18 @@ export default function FeaturesSettingsScreen() {
                         <Switch
                             value={markdownCopyV2}
                             onValueChange={setMarkdownCopyV2}
+                        />
+                    }
+                    showChevron={false}
+                />
+                <Item
+                    title={t('settingsFeatures.showThinking')}
+                    subtitle={t('settingsFeatures.showThinkingSubtitle')}
+                    icon={<Ionicons name="bulb-outline" size={29} color="#FFCC00" />}
+                    rightElement={
+                        <Switch
+                            value={showThinking}
+                            onValueChange={setShowThinking}
                         />
                     }
                     showChevron={false}

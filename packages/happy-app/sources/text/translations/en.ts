@@ -243,6 +243,8 @@ export const en: TranslationStructure = {
         commandPaletteDisabled: 'Quick command access disabled',
         markdownCopyV2: 'Markdown Copy v2',
         markdownCopyV2Subtitle: 'Long press opens copy modal',
+        showThinking: 'Show thinking',
+        showThinkingSubtitle: 'Display agent reasoning in collapsed blocks',
         hideInactiveSessions: 'Hide inactive sessions',
         hideInactiveSessionsSubtitle: 'Show only active chats in your list',
         groupToolCalls: 'Group Tool Calls',
@@ -323,6 +325,9 @@ export const en: TranslationStructure = {
     },
 
     session: {
+        pin: "Pin to top",
+        unpin: "Unpin",
+        renameEmpty: 'A session name is required.',
         inputPlaceholder: 'Type a message ...',
         inactiveArchived: 'This session is inactive.',
         resumeFromTerminal: 'To resume it from the terminal:',

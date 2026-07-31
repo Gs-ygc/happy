@@ -352,11 +352,11 @@ class Sync {
         this.sessionQueueProcessing.add(sessionId);
         const lock = this.getSessionMessageLock(sessionId);
         void lock.inLock(() => {
-            while (true) {
-                const pending = this.sessionMessageQueue.get(sessionId);
-                if (!pending || pending.length === 0) {
-                    break;
-                }
+            const pending = this.sessionMessageQueue.get(sessionId);
+            if (pending && pending.length > 0) {
+                // Process one event-loop-sized batch at a time. A long burst
+                // of streamed output must not monopolize the JS thread while
+                // FlatList and the composer are waiting to render.
                 const batch = pending.splice(0, pending.length);
                 this.applyMessages(sessionId, batch);
             }
@@ -364,7 +364,7 @@ class Sync {
             this.sessionQueueProcessing.delete(sessionId);
             const pending = this.sessionMessageQueue.get(sessionId);
             if (pending && pending.length > 0) {
-                this.scheduleQueuedMessagesProcessing(sessionId);
+                setTimeout(() => this.scheduleQueuedMessagesProcessing(sessionId), 0);
             }
         });
     }
@@ -1891,16 +1891,13 @@ class Sync {
             const isInitialLoad = knownLastSeq === undefined;
             if (isInitialLoad) {
                 // Initial load. Pull only the most recent page so the user can
-                // start chatting immediately. Older history streams in lazily
-                // through loadOlderMessages() when the user scrolls up — and
-                // also through a background prefetch kicked off below, so the
-                // history fills in even when the user doesn't scroll.
+                // start chatting immediately. Older history is fetched only
+                // when the user scrolls up through loadOlderMessages().
                 //
-                // Previously this method walked forward from seq=0 until every
-                // page had been fetched and decrypted, which blocked the chat
-                // from displaying anything for sessions with thousands of
-                // messages. The user's reported pain point was "opening a long
-                // session feels frozen" — this is the fix.
+                // Do not prefetch the remaining history in the background.
+                // Each appended page rebuilds the message list and grouping;
+                // automatically draining a long session eventually exhausts
+                // memory and blocks the JS thread on Android tablets.
                 await this.fetchInitialLatestPage(sessionId, encryption);
             } else {
                 // Forward incremental sync. Used after reconnect, invalidate,
@@ -1911,51 +1908,7 @@ class Sync {
 
             storage.getState().applyMessagesLoaded(sessionId);
             log.log(`💬 fetchMessages completed for session ${sessionId}`);
-
-            if (isInitialLoad) {
-                // Fire-and-forget. The chat is interactive at this point;
-                // background pages stream in without blocking either the
-                // surrounding lock or the UI. loadOlderMessages takes the
-                // same lock internally, so the loop naturally serialises
-                // with on-scroll triggers and live socket updates.
-                void this.prefetchOlderMessagesInBackground(sessionId);
-            }
         });
-    }
-
-    private prefetchOlderMessagesInBackground = async (sessionId: string) => {
-        const SLEEP_BETWEEN_PAGES_MS = 250;
-        // While loadOlderMessages handles the actual work, this loop is what
-        // keeps it going without user input. We keep stepping until either:
-        //   - the server says there is no more older history, or
-        //   - the session is no longer present in the store (user navigated
-        //     away and the session was unloaded), or
-        //   - we hit seq = 1 (the very first message), or
-        //   - the encryption key is gone (logged out).
-        // The loop yields between pages to keep the UI thread responsive
-        // and to spread out server load.
-        while (true) {
-            const sessionMessages = storage.getState().sessionMessages[sessionId];
-            if (!sessionMessages || !sessionMessages.hasMoreOlder) {
-                return;
-            }
-            if (!this.encryption.getSessionEncryption(sessionId)) {
-                return;
-            }
-            const oldestSeq = this.sessionOldestSeq.get(sessionId);
-            if (oldestSeq === undefined || oldestSeq <= 1) {
-                return;
-            }
-
-            try {
-                await this.loadOlderMessages(sessionId);
-            } catch (error) {
-                log.log(`💬 prefetchOlderMessagesInBackground: error for ${sessionId}, stopping: ${String(error)}`);
-                return;
-            }
-
-            await new Promise((resolve) => setTimeout(resolve, SLEEP_BETWEEN_PAGES_MS));
-        }
     }
 
     private fetchInitialLatestPage = async (

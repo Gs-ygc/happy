@@ -215,6 +215,8 @@ export const ru: TranslationStructure = {
         commandPaletteDisabled: 'Быстрый доступ к командам отключён',
         markdownCopyV2: 'Markdown Copy v2',
         markdownCopyV2Subtitle: 'Долгое нажатие открывает модальное окно копирования',
+        showThinking: 'Показывать рассуждения',
+        showThinkingSubtitle: 'Показывает рассуждения агента в свернутых блоках',
         hideInactiveSessions: 'Скрывать неактивные сессии',
         hideInactiveSessionsSubtitle: 'Показывать в списке только активные чаты',
         groupToolCalls: 'Группировать вызовы инструментов',
@@ -432,6 +434,9 @@ export const ru: TranslationStructure = {
     },
 
     session: {
+        pin: "Pin to top",
+        unpin: "Unpin",
+        renameEmpty: 'Требуется название сессии.',
         inputPlaceholder: 'Введите сообщение...',
         inactiveArchived: 'Эта сессия неактивна.',
         resumeFromTerminal: 'Чтобы возобновить её из терминала:',

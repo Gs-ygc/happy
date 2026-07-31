@@ -227,6 +227,8 @@ export const it: TranslationStructure = {
         commandPaletteDisabled: 'Accesso rapido ai comandi disabilitato',
         markdownCopyV2: 'Markdown Copy v2',
         markdownCopyV2Subtitle: 'Pressione lunga apre la finestra di copia',
+        showThinking: 'Mostra ragionamento',
+        showThinkingSubtitle: 'Mostra il ragionamento dell’agente in blocchi compressi',
         hideInactiveSessions: 'Nascondi sessioni inattive',
         hideInactiveSessionsSubtitle: 'Mostra solo le chat attive nella tua lista',
         groupToolCalls: 'Raggruppa chiamate agli strumenti',
@@ -307,6 +309,9 @@ export const it: TranslationStructure = {
     },
 
     session: {
+        pin: "Pin to top",
+        unpin: "Unpin",
+        renameEmpty: 'È necessario un nome per la sessione.',
         inputPlaceholder: 'Scrivi un messaggio ...',
         inactiveArchived: 'Questa sessione è inattiva.',
         resumeFromTerminal: 'Per riprenderla dal terminale:',
