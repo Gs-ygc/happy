@@ -194,7 +194,7 @@ describe('settings', () => {
                 sortSessionsByActivity: false,
                 expResumeSession: false,
                 fileDiffsSidebar: false,
-                groupToolCalls: false,
+                groupToolCalls: true,
                 expImageUpload: false,
                 reviewPromptAnswered: false,
                 reviewPromptLikedApp: null,

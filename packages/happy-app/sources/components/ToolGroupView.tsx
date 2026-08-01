@@ -115,7 +115,9 @@ export const AgentWorkGroupView = React.memo<AgentWorkGroupViewProps>((props) =>
     const durationMs = group.completedAt === null
         ? runningElapsedSeconds * 1000
         : group.completedAt - group.startedAt;
-    const label = t('toolGroup.workedFor', { duration: formatWorkDuration(durationMs) });
+    const durationLabel = t('toolGroup.workedFor', { duration: formatWorkDuration(durationMs) });
+    const workSummary = React.useMemo(() => generateGroupSummary(group.messages), [group.messages]);
+    const label = workSummary ? `${durationLabel} · ${workSummary}` : durationLabel;
     const nestedItemsNewestFirst = React.useMemo(
         () => groupToolCallsForDisplay(group.messages, true, { groupSingleToolCalls: true }),
         [group.messages],

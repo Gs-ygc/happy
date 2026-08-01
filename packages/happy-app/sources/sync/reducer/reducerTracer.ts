@@ -178,7 +178,10 @@ export function traceMessages(state: TracerState, messages: NormalizedMessage[])
     
     for (const message of messages) {
         // Skip if already processed
-        if (state.processedIds.has(message.id)) {
+        // Codex agent snapshots reuse one stable envelope id while text streams.
+        // Let the reducer see each snapshot so it can update the existing row.
+        const isReplayableStreamMessage = message.id.startsWith('codex-agent:');
+        if (state.processedIds.has(message.id) && !isReplayableStreamMessage) {
             continue;
         }
         
@@ -212,7 +215,9 @@ export function traceMessages(state: TracerState, messages: NormalizedMessage[])
         
         // Non-sidechain messages are returned immediately without sidechain ID
         if (!message.isSidechain) {
-            state.processedIds.add(message.id);
+            if (!isReplayableStreamMessage) {
+                state.processedIds.add(message.id);
+            }
             const tracedMessage: TracedMessage = {
                 ...message
             };

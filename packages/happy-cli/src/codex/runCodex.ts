@@ -52,8 +52,12 @@ import { discoverCodexSkillCommands } from './codexSkills';
 import {
     codexGoalActionCapabilities,
     mapCodexGoalEventToAgentGoalStatus,
+    formatCodexGoalProgressNotification,
+    getCodexGoalProgressSnapshot,
     parseCodexGoalActionParams,
     parseCodexGoalCommand,
+    shouldNotifyCodexGoalProgress,
+    type CodexGoalProgressSnapshot,
     type CodexGoalCommand,
 } from './codexGoalStatus';
 
@@ -684,6 +688,7 @@ export async function runCodex(opts: {
             session.sendSessionProtocolMessage(envelope);
         }
     });
+    let lastGoalProgressNotification: { snapshot: CodexGoalProgressSnapshot; sentAt: number } | null = null;
     const updateCodexGoalState = (message: Record<string, unknown>) => {
         const capabilities = codexGoalActionCapabilities(client.supportsGoalActions());
         const goalStatus = mapCodexGoalEventToAgentGoalStatus(
@@ -698,6 +703,41 @@ export async function runCodex(opts: {
             ...currentState,
             agentGoalStatus: goalStatus,
         }));
+        if (goalStatus.status !== 'active') {
+            lastGoalProgressNotification = null;
+            return;
+        }
+
+        const snapshot = getCodexGoalProgressSnapshot(goalStatus);
+        if (!snapshot) {
+            return;
+        }
+        const now = Date.now();
+        if (!lastGoalProgressNotification) {
+            lastGoalProgressNotification = { snapshot, sentAt: now };
+            return;
+        }
+
+        if (shouldNotifyCodexGoalProgress(
+            lastGoalProgressNotification.snapshot,
+            snapshot,
+            now - lastGoalProgressNotification.sentAt,
+        )) {
+            const body = formatCodexGoalProgressNotification(goalStatus);
+            if (body) {
+                api.push().sendSessionNotification({
+                    kind: 'progress',
+                    metadata: session.getMetadata(),
+                    body,
+                    data: {
+                        sessionId: session.sessionId,
+                        type: 'goal-progress',
+                        provider: 'codex',
+                    },
+                });
+                lastGoalProgressNotification = { snapshot, sentAt: now };
+            }
+        }
     };
     const handleCodexGoalCommand = async (
         command: CodexGoalCommand,

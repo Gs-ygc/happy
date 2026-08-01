@@ -5,6 +5,26 @@ import { MessageView } from '@/components/MessageView';
 import { debugMessages } from './messages-demo-data';
 import { Message } from '@/sync/typesMessage';
 import { useDemoMessages } from '@/hooks/useDemoMessages';
+import { AgentGoalBar } from '@/components/AgentGoalBar';
+import type { VisibleAgentGoalStatus } from '@/components/agentGoalStatus';
+
+const DEMO_GOAL: VisibleAgentGoalStatus = {
+    source: 'codex',
+    status: 'active',
+    text: 'Improve the Codex long-task review experience',
+    sourceSessionId: 'demo-codex-thread',
+    observedAt: Date.now(),
+    progress: {
+        state: 'active',
+        tokensUsed: 18_500,
+        tokenBudget: 50_000,
+        timeUsedSeconds: 754,
+    },
+    capabilities: {
+        edit: true,
+        clear: true,
+    },
+};
 
 export default React.memo(function MessagesDemoScreen() {
     // Combine all demo messages
@@ -15,6 +35,9 @@ export default React.memo(function MessagesDemoScreen() {
 
     return (
         <View style={styles.container}>
+            <View style={styles.goalPreview}>
+                <AgentGoalBar goal={DEMO_GOAL} onAction={() => {}} />
+            </View>
             {allMessages.length > 0 && (
                 <FlatList
                     data={allMessages}
@@ -41,5 +64,9 @@ const styles = StyleSheet.create((theme) => ({
     container: {
         flex: 1,
         backgroundColor: theme.colors.surface,
+    },
+    goalPreview: {
+        paddingHorizontal: 16,
+        paddingTop: 8,
     },
 }));

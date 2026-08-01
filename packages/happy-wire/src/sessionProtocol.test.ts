@@ -21,7 +21,7 @@ describe('session protocol schemas', () => {
         description: 'Run `ls -la` in the repo root',
         args: { command: 'ls -la' },
       },
-      { t: 'tool-call-end', call: 'call-1' },
+      { t: 'tool-call-end', call: 'call-1', result: 'ok', exitCode: 0, durationMs: 12 },
       { t: 'file', ref: 'upload-1', name: 'report.txt', size: 1024, mimeType: 'text/plain' },
       {
         t: 'file',

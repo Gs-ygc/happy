@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ToolCall } from '@/sync/typesMessage';
 import {
+    getTerminalToolExecutionMeta,
     getTerminalToolOutput,
     getTerminalToolCommand,
     getToolSummaryCategory,
@@ -98,5 +99,21 @@ describe('terminal tool display helpers', () => {
             state: 'error',
             result: { message: 'failed' },
         })).toEqual({ error: '{\n  "message": "failed"\n}' });
+
+        expect(getTerminalToolOutput({
+            state: 'error',
+            result: { output: 'failed output', exitCode: 1, durationMs: 250 },
+        })).toEqual({ stderr: undefined, error: 'failed output' });
+        expect(getTerminalToolExecutionMeta({
+            result: { output: 'failed output', exitCode: 1, durationMs: 250 },
+        })).toEqual({ exitCode: 1, durationMs: 250 });
+
+        expect(getTerminalToolOutput({
+            state: 'completed',
+            result: { output: null, exitCode: 0, durationMs: 1_200 },
+        })).toBeNull();
+        expect(getTerminalToolExecutionMeta({
+            result: { output: null, exitCode: 0, durationMs: 1_200 },
+        })).toEqual({ exitCode: 0, durationMs: 1_200 });
     });
 });

@@ -52,6 +52,10 @@ describe('AgentGoalStatusSchema', () => {
             progress: {
                 currentStep: 1,
                 totalSteps: 2,
+                state: 'active',
+                tokensUsed: 1200,
+                tokenBudget: 5000,
+                timeUsedSeconds: 45,
                 steps: [
                     { text: 'inspect source', status: 'completed' },
                     { text: 'write fix', status: 'in_progress' },
@@ -66,6 +70,7 @@ describe('AgentGoalStatusSchema', () => {
         expect(goal.text).toBe('finish the current task');
         expect(goal.capabilities?.clear).toBe(true);
         expect(goal.progress?.steps).toHaveLength(2);
+        expect(goal.progress?.tokensUsed).toBe(1200);
     });
 
     it('accepts inactive and unavailable states', () => {

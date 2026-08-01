@@ -354,6 +354,10 @@ export type AgentGoalStatus = {
       progress?: {
         currentStep?: number,
         totalSteps?: number,
+        state?: 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited',
+        tokensUsed?: number,
+        tokenBudget?: number | null,
+        timeUsedSeconds?: number,
         steps?: Array<{
           text: string,
           status: 'pending' | 'in_progress' | 'completed',

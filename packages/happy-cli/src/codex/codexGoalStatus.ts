@@ -15,6 +15,13 @@ export type CodexGoalCommand =
     | { type: 'set'; objective: string }
     | { type: 'clear' };
 
+export type CodexGoalProgressSnapshot = {
+    state?: string;
+    tokensUsed?: number;
+    tokenBudget?: number | null;
+    timeUsedSeconds?: number;
+};
+
 const ACTIVE_CODEX_GOAL_STATUSES = new Set([
     'active',
     'paused',
@@ -112,12 +119,83 @@ export function mapCodexGoalEventToAgentGoalStatus(
         };
     }
 
+    const tokensUsed = finiteNumber(goal.tokensUsed);
+    const tokenBudget = finiteNumber(goal.tokenBudget);
+    const timeUsedSeconds = finiteNumber(goal.timeUsedSeconds);
+
     return {
         ...baseStatus(threadId, sourceRevision),
         status: 'active',
         text: objective,
+        progress: {
+            state: status as 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited',
+            ...(tokensUsed !== null ? { tokensUsed } : {}),
+            ...(tokenBudget !== null ? { tokenBudget } : {}),
+            ...(timeUsedSeconds !== null ? { timeUsedSeconds } : {}),
+        },
         ...(opts?.capabilities ? { capabilities: opts.capabilities } : {}),
     };
+}
+
+export function getCodexGoalProgressSnapshot(status: AgentGoalStatus): CodexGoalProgressSnapshot | null {
+    if (status.status !== 'active') return null;
+    return {
+        state: status.progress?.state,
+        tokensUsed: status.progress?.tokensUsed,
+        tokenBudget: status.progress?.tokenBudget,
+        timeUsedSeconds: status.progress?.timeUsedSeconds,
+    };
+}
+
+export function shouldNotifyCodexGoalProgress(
+    previous: CodexGoalProgressSnapshot,
+    next: CodexGoalProgressSnapshot,
+    elapsedMs: number,
+): boolean {
+    if (previous.state !== next.state) {
+        return true;
+    }
+
+    if (elapsedMs < 10 * 60 * 1000) {
+        return false;
+    }
+
+    const tokenThreshold = next.tokenBudget
+        ? Math.max(1_000, next.tokenBudget * 0.1)
+        : 10_000;
+    const tokenDelta = next.tokensUsed !== undefined && previous.tokensUsed !== undefined
+        ? next.tokensUsed - previous.tokensUsed
+        : 0;
+    const timeDelta = next.timeUsedSeconds !== undefined && previous.timeUsedSeconds !== undefined
+        ? next.timeUsedSeconds - previous.timeUsedSeconds
+        : 0;
+
+    return tokenDelta >= tokenThreshold || timeDelta >= 15 * 60;
+}
+
+function compactCount(value: number): string {
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+    return String(value);
+}
+
+export function formatCodexGoalProgressNotification(status: AgentGoalStatus): string | null {
+    if (status.status !== 'active') return null;
+
+    const parts = [status.text];
+    const progress = status.progress;
+    if (progress?.state && progress.state !== 'active') {
+        parts.push(progress.state.replace(/([A-Z])/g, ' $1').toLowerCase());
+    }
+    if (progress?.tokensUsed !== undefined) {
+        parts.push(progress.tokenBudget
+            ? `${compactCount(progress.tokensUsed)}/${compactCount(progress.tokenBudget)} tokens`
+            : `${compactCount(progress.tokensUsed)} tokens`);
+    }
+    if (progress?.timeUsedSeconds !== undefined) {
+        parts.push(`${Math.max(0, Math.floor(progress.timeUsedSeconds / 60))}m elapsed`);
+    }
+    return parts.join(' · ').slice(0, 500);
 }
 
 export function parseCodexGoalCommand(text: string): CodexGoalCommand | null {

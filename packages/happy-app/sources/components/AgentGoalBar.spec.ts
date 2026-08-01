@@ -99,6 +99,24 @@ describe('AgentGoalBar', () => {
         expect(findAllByLabel(element, 'Current goal: finish the current task')).toHaveLength(1);
     });
 
+    it('renders Codex goal runtime progress', async () => {
+        const element = await renderGoalBar({
+            goal: {
+                ...goal,
+                source: 'codex',
+                progress: {
+                    state: 'active',
+                    tokensUsed: 1500,
+                    tokenBudget: 3000,
+                    timeUsedSeconds: 125,
+                },
+            },
+        });
+
+        expect(textContent(element)).toContain('1.5k/3.0k tokens');
+        expect(textContent(element)).toContain('2m');
+    });
+
     it('does not render action buttons without an action handler', async () => {
         const element = await renderGoalBar({
             goal: {

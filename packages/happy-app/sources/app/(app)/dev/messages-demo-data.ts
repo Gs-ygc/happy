@@ -184,6 +184,69 @@ Inline code now renders as \`happy render\` without a background highlight.
         children: []
     },
 
+    // Codex transcript states: reasoning, command result metadata, and multi-file diff
+    {
+        id: 'codex-thinking',
+        localId: null,
+        createdAt: Date.now() - 158000,
+        kind: 'agent-text',
+        text: 'Checking the protocol mapper and comparing the App rendering paths before editing.',
+        isThinking: true,
+    },
+    {
+        id: 'codex-bash-completed',
+        localId: null,
+        createdAt: Date.now() - 157000,
+        kind: 'tool-call',
+        tool: createToolCall('CodexBash', 'completed', {
+            command: 'corepack pnpm --filter happy-app typecheck',
+            parsed_cmd: [{ type: 'bash', cmd: 'corepack pnpm --filter happy-app typecheck' }],
+        }, {
+            output: '> happy-app@1.0.0 typecheck\n> tsc --noEmit\n\nType check completed successfully.',
+            exitCode: 0,
+            durationMs: 2384,
+        }),
+        children: [],
+    },
+    {
+        id: 'codex-bash-no-output',
+        localId: null,
+        createdAt: Date.now() - 156500,
+        kind: 'tool-call',
+        tool: createToolCall('CodexBash', 'completed', {
+            command: 'git diff --quiet',
+            parsed_cmd: [{ type: 'bash', cmd: 'git diff --quiet' }],
+        }, {
+            output: null,
+            exitCode: 0,
+            durationMs: 86,
+        }),
+        children: [],
+    },
+    {
+        id: 'codex-multi-file-diff',
+        localId: null,
+        createdAt: Date.now() - 156000,
+        kind: 'tool-call',
+        tool: createToolCall('CodexDiff', 'completed', {
+            unified_diff: [
+                'diff --git a/src/first.ts b/src/first.ts',
+                '--- a/src/first.ts',
+                '+++ b/src/first.ts',
+                '@@ -1 +1 @@',
+                '-export const state = "old";',
+                '+export const state = "ready";',
+                'diff --git a/src/second.ts b/src/second.ts',
+                '--- a/src/second.ts',
+                '+++ b/src/second.ts',
+                '@@ -1 +1 @@',
+                '-export const count = 1;',
+                '+export const count = 2;',
+            ].join('\n'),
+        }, { status: 'completed' }),
+        children: [],
+    },
+
     // Edit tool - running
     {
         id: 'edit-running',

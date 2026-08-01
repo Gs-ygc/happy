@@ -237,6 +237,28 @@ export interface ResumeSessionOptions {
 // Exported session operation functions
 
 /**
+ * List directories on a machine before a session exists.
+ * Used by the new-session path picker for remote autocomplete.
+ */
+export async function machineListDirectory(
+    machineId: string,
+    path: string,
+): Promise<SessionListDirectoryResponse> {
+    try {
+        return await apiSocket.machineRPC<SessionListDirectoryResponse, SessionListDirectoryRequest>(
+            machineId,
+            'listDirectory',
+            { path },
+        );
+    } catch (error) {
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to list directory',
+        };
+    }
+}
+
+/**
  * Spawn a new remote session on a specific machine
  */
 export async function machineSpawnNewSession(options: SpawnSessionOptions): Promise<SpawnSessionResult> {

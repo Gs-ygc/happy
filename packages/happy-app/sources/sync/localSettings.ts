@@ -18,6 +18,7 @@ export const LocalSettingsSchema = z.object({
     showThinking: z.boolean().describe("Show agent thinking/reasoning in chat"),
     pinnedSessionIds: z.array(z.string()).describe("Session IDs that are pinned to the top of the sessions list"),
     pinnedMachineIds: z.array(z.string()).describe("Machine IDs that are pinned to the top of the machine list"),
+    collapsedSessionMachineIds: z.array(z.string()).describe("Machine groups collapsed in the sessions list"),
     // CLI version acknowledgments - keyed by machineId
     acknowledgedCliVersions: z.record(z.string(), z.string()).describe('Acknowledged CLI versions per machine'),
 });
@@ -45,9 +46,10 @@ export const localSettingsDefaults: LocalSettings = {
     consoleLoggingEnabled: false,
     verboseLogging: false,
     zenMode: false,
-    showThinking: false,
+    showThinking: true,
     pinnedSessionIds: [],
     pinnedMachineIds: [],
+    collapsedSessionMachineIds: [],
     acknowledgedCliVersions: {},
 };
 Object.freeze(localSettingsDefaults);

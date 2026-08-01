@@ -36,7 +36,7 @@ import { useAllMachines, useLocalSetting, useSessions, useSetting, storage } fro
 import type { NewSessionAgentType } from '@/sync/persistence';
 import { sync } from '@/sync/sync';
 import { isMachineOnline } from '@/utils/machineUtils';
-import { machineSpawnNewSession, sessionSetAgentModes, type SessionAgentModesPatch } from '@/sync/ops';
+import { machineListDirectory, machineSpawnNewSession, sessionSetAgentModes, type SessionAgentModesPatch } from '@/sync/ops';
 import { createWorktree, listWorktrees } from '@/utils/worktree';
 import { resolveAbsolutePath } from '@/utils/pathUtils';
 import { formatPathRelativeToHome, formatLastSeen } from '@/utils/sessionUtils';
@@ -58,6 +58,7 @@ import {
 import { isRunningOnMac } from '@/utils/platform';
 import { getNewSessionSidebarLayout } from '@/utils/newSessionSidebarLayout';
 import { getAgentPickerItems, getModePickerItems } from '@/utils/newSessionPickerItems';
+import { filterPathSuggestions, getDirectoryPathSuggestions, getPathAutocompleteRequest } from '@/utils/newSessionPathAutocomplete';
 import { resolveAgentDefaultConfig } from '@/sync/agentDefaults';
 
 // Agent icon assets
@@ -334,6 +335,7 @@ function PathPickerContent({
     title,
     items,
     value,
+    machineId,
     homeDir,
     onChangeValue,
     onDone,
@@ -342,6 +344,7 @@ function PathPickerContent({
     title: string;
     items: PickerItem[];
     value: string | null;
+    machineId?: string | null;
     homeDir?: string;
     onChangeValue: (value: string) => void;
     onDone?: () => void;
@@ -351,6 +354,8 @@ function PathPickerContent({
     const inputRef = React.useRef<TextInput>(null);
     const currentValue = value ?? '';
     const [selection, setSelection] = React.useState<{ start: number; end: number } | undefined>(undefined);
+    const [directoryItems, setDirectoryItems] = React.useState<PickerItem[]>([]);
+    const [isLoadingSuggestions, setIsLoadingSuggestions] = React.useState(false);
 
     React.useEffect(() => {
         const timeout = setTimeout(() => {
@@ -365,12 +370,51 @@ function PathPickerContent({
             return null;
         }
 
-        const match = items.find((item) =>
+        const match = [...directoryItems, ...items].find((item) =>
             normalizePathForComparison(item.key, homeDir) === normalizedValue,
         );
 
         return match?.key ?? null;
-    }, [currentValue, homeDir, items]);
+    }, [currentValue, directoryItems, homeDir, items]);
+
+    React.useEffect(() => {
+        const request = getPathAutocompleteRequest(currentValue, homeDir);
+        if (!machineId || !request) {
+            setDirectoryItems([]);
+            setIsLoadingSuggestions(false);
+            return;
+        }
+        let cancelled = false;
+
+        const timeout = setTimeout(async () => {
+            setIsLoadingSuggestions(true);
+            const result = await machineListDirectory(machineId, request.queryPath);
+            if (cancelled) return;
+
+            if (!result.success || !result.entries) {
+                setDirectoryItems([]);
+                setIsLoadingSuggestions(false);
+                return;
+            }
+
+            setDirectoryItems(getDirectoryPathSuggestions(request, result.entries));
+            setIsLoadingSuggestions(false);
+        }, 180);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timeout);
+        };
+    }, [currentValue, homeDir, machineId]);
+
+    const visibleItems = React.useMemo(() => {
+        return filterPathSuggestions(
+            currentValue,
+            homeDir,
+            [...directoryItems, ...items],
+            normalizePathForComparison,
+        );
+    }, [currentValue, directoryItems, homeDir, items]);
 
     const handleSuggestionPress = React.useCallback((item: PickerItem) => {
         const nextValue = item.label;
@@ -467,16 +511,21 @@ function PathPickerContent({
                 </Text>
             )}
 
-            <Text style={[pickerStyles.sectionLabel, { color: theme.colors.textSecondary }]}>
-                Recent
-            </Text>
+            <View style={pickerStyles.sectionLabelRow}>
+                <Text style={[pickerStyles.sectionLabel, { color: theme.colors.textSecondary }]}>
+                    {currentValue.trim() ? 'Suggestions' : 'Recent'}
+                </Text>
+                {isLoadingSuggestions && (
+                    <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+                )}
+            </View>
 
             <ScrollView
                 style={[pickerStyles.optionList, embedded && pickerStyles.embeddedOptionList]}
                 contentContainerStyle={embedded && pickerStyles.embeddedOptionListContent}
                 keyboardShouldPersistTaps="handled"
             >
-                {items.map((item) => {
+                {visibleItems.map((item) => {
                     const isSelected = item.key === matchedItemKey;
 
                     return (
@@ -510,9 +559,9 @@ function PathPickerContent({
                     );
                 })}
 
-                {items.length === 0 && (
+                {visibleItems.length === 0 && !isLoadingSuggestions && (
                     <Text style={[pickerStyles.emptyText, { color: theme.colors.textSecondary }]}>
-                        no recent projects yet
+                        {currentValue.trim() ? 'no matching folders' : 'no recent projects yet'}
                     </Text>
                 )}
             </ScrollView>
@@ -1099,6 +1148,7 @@ function NewSessionScreen() {
                         title="Project"
                         items={pathItems}
                         value={selectedPath}
+                        machineId={selectedMachineId}
                         homeDir={selectedHomeDir}
                         onChangeValue={setSelectedPath}
                         onDone={() => setActivePicker(null)}
@@ -1477,6 +1527,7 @@ function NewSessionScreen() {
                             title="Project"
                             items={pathItems}
                             value={selectedPath}
+                            machineId={selectedMachineId}
                             homeDir={selectedHomeDir}
                             onChangeValue={setSelectedPath}
                             onDone={() => setActivePicker(null)}
@@ -1947,10 +1998,16 @@ const pickerStyles = {
         ...Typography.default(),
         ...Platform.select({ web: { userSelect: 'none' } as any, default: {} }),
     } as const,
-    sectionLabel: {
-        fontSize: 13,
+    sectionLabelRow: {
+        flexDirection: 'row' as const,
+        alignItems: 'center' as const,
+        justifyContent: 'space-between' as const,
+        minHeight: 28,
         paddingHorizontal: 4,
         paddingBottom: 8,
+    } as const,
+    sectionLabel: {
+        fontSize: 13,
         ...Typography.default('semiBold'),
         ...Platform.select({ web: { userSelect: 'none' } as any, default: {} }),
     } as const,

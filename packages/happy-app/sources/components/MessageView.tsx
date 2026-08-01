@@ -100,7 +100,7 @@ function RenderBlock(props: {
       );
 
     case 'agent-text':
-      return <AgentTextBlock message={props.message} sessionId={props.sessionId} />;
+      return <AgentTextBlock message={props.message} metadata={props.metadata} sessionId={props.sessionId} />;
 
     case 'tool-call':
       return <ToolCallBlock
@@ -279,13 +279,14 @@ function ThinkingBlock({ text }: { text: string }) {
 
 function AgentTextBlock(props: {
   message: AgentTextMessage;
+  metadata: Metadata | null;
   sessionId: string;
 }) {
   const handleOptionPress = React.useCallback((option: Option) => {
     sync.sendMessage(props.sessionId, option.title, { source: 'option' });
   }, [props.sessionId]);
 
-  const showThinking = useLocalSetting('showThinking');
+  const showThinking = useLocalSetting('showThinking') || props.metadata?.flavor === 'codex';
 
   // Show thinking as a collapsed expandable block when enabled
   if (props.message.isThinking) {

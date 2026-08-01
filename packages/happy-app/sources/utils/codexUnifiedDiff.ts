@@ -4,6 +4,11 @@ export type ParsedUnifiedDiff = {
     fileName?: string;
 };
 
+export type UnifiedDiffFile = {
+    patch: string;
+    fileName?: string;
+};
+
 export type UnifiedDiffFileKind = 'add' | 'delete' | 'update' | string | null | undefined;
 
 export function materializeUnifiedDiffPatch(
@@ -89,4 +94,20 @@ export function parseUnifiedDiff(unifiedDiff: string): ParsedUnifiedDiff {
         newText: newLines.join('\n'),
         fileName,
     };
+}
+
+/** Split a git-style unified diff into independently reviewable file patches. */
+export function splitUnifiedDiffFiles(unifiedDiff: string): UnifiedDiffFile[] {
+    const boundaries = Array.from(unifiedDiff.matchAll(/^diff --git .+$/gm));
+    if (boundaries.length <= 1) {
+        return [{ patch: unifiedDiff, fileName: parseUnifiedDiff(unifiedDiff).fileName }];
+    }
+
+    return boundaries.map((boundary, index) => {
+        const boundaryIndex = boundary.index ?? 0;
+        const start = index === 0 ? 0 : boundaryIndex;
+        const end = boundaries[index + 1]?.index ?? unifiedDiff.length;
+        const patch = unifiedDiff.slice(start, end).trimEnd();
+        return { patch, fileName: parseUnifiedDiff(patch).fileName };
+    });
 }

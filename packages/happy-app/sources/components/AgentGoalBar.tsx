@@ -14,6 +14,43 @@ type AgentGoalBarProps = {
     onPressDetails?: () => void;
 };
 
+function formatCount(value: number): string {
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+    return String(value);
+}
+
+function formatDuration(totalSeconds: number): string {
+    const seconds = Math.max(0, Math.floor(totalSeconds));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m`;
+    return `${seconds}s`;
+}
+
+export function getGoalProgressText(goal: VisibleAgentGoalStatus): string | null {
+    const progress = goal.progress;
+    if (!progress) return null;
+
+    const parts: string[] = [];
+    if (progress.state && progress.state !== 'active') {
+        parts.push(progress.state.replace(/([A-Z])/g, ' $1').toLowerCase());
+    }
+    if (progress.currentStep && progress.totalSteps) {
+        parts.push(`${progress.currentStep}/${progress.totalSteps}`);
+    }
+    if (progress.tokensUsed !== undefined) {
+        parts.push(progress.tokenBudget
+            ? `${formatCount(progress.tokensUsed)}/${formatCount(progress.tokenBudget)} tokens`
+            : `${formatCount(progress.tokensUsed)} tokens`);
+    }
+    if (progress.timeUsedSeconds !== undefined) {
+        parts.push(formatDuration(progress.timeUsedSeconds));
+    }
+    return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 const ACTION_CONFIG: Array<{
     action: AgentGoalAction;
     capability: keyof NonNullable<VisibleAgentGoalStatus['capabilities']>;
@@ -34,6 +71,10 @@ export function AgentGoalBar(props: AgentGoalBarProps) {
         stop: t('components.agentGoalBar.stopGoal'),
         clear: t('components.agentGoalBar.clearGoal'),
     };
+    const progressText = getGoalProgressText(props.goal);
+    const tokenProgress = props.goal.progress?.tokenBudget
+        ? Math.min(1, (props.goal.progress.tokensUsed ?? 0) / props.goal.progress.tokenBudget)
+        : null;
 
     return (
         <Pressable
@@ -77,6 +118,31 @@ export function AgentGoalBar(props: AgentGoalBarProps) {
                 >
                     {props.goal.text}
                 </Text>
+                {progressText && (
+                    <Text
+                        style={{
+                            color: theme.colors.textSecondary,
+                            fontSize: 11,
+                            lineHeight: 15,
+                            marginTop: 2,
+                        }}
+                        numberOfLines={1}
+                    >
+                        {progressText}
+                    </Text>
+                )}
+                {tokenProgress !== null && (
+                    <View style={{ height: 3, borderRadius: 2, backgroundColor: theme.colors.divider, marginTop: 6, overflow: 'hidden' }}>
+                        <View
+                            style={{
+                                height: 3,
+                                borderRadius: 2,
+                                backgroundColor: theme.colors.button.secondary.tint,
+                                width: `${Math.round(tokenProgress * 100)}%`,
+                            }}
+                        />
+                    </View>
+                )}
             </View>
             {actions.length > 0 && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>

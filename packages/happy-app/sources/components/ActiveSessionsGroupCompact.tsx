@@ -143,7 +143,19 @@ const SectionHeader = React.memo(({ session, displayPath }: { session: SessionRo
 });
 
 // Full-width separator between machine groups.
-const MachineSeparator = React.memo(({ machineName, machineId }: { machineName: string; machineId: string }) => {
+const MachineSeparator = React.memo(({
+    machineName,
+    machineId,
+    sessionCount,
+    collapsed,
+    onToggle,
+}: {
+    machineName: string;
+    machineId: string;
+    sessionCount: number;
+    collapsed: boolean;
+    onToggle: () => void;
+}) => {
     const styles = stylesheet;
     const { theme } = useUnistyles();
     const router = useRouter();
@@ -167,12 +179,27 @@ const MachineSeparator = React.memo(({ machineName, machineId }: { machineName: 
     return (
         <View style={styles.machineSeparator}>
             <View style={styles.machineSeparatorLine} />
-            <Ionicons name="desktop-outline" size={11} color={theme.colors.textSecondary} style={{ marginHorizontal: 6 }} />
+            <Pressable
+                onPress={onToggle}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`${collapsed ? 'Expand' : 'Collapse'} ${machineName} sessions`}
+                accessibilityState={{ expanded: !collapsed }}
+                style={styles.machineCollapseButton}
+            >
+                <Ionicons
+                    name={collapsed ? 'chevron-forward' : 'chevron-down'}
+                    size={12}
+                    color={theme.colors.textSecondary}
+                />
+            </Pressable>
+            <Ionicons name="desktop-outline" size={12} color={theme.colors.textSecondary} style={{ marginRight: 6 }} />
             <Pressable onPress={handlePress} style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
                 <Text style={styles.machineSeparatorText} numberOfLines={1}>
                     {machineName}
                 </Text>
             </Pressable>
+            <Text style={styles.machineSessionCount}>{sessionCount}</Text>
             <Pressable onPress={togglePin} hitSlop={8} style={{ padding: 2, marginLeft: 4 }}>
                 <Ionicons
                     name={isPinned ? 'pin' : 'pin-outline'}
@@ -188,6 +215,7 @@ const MachineSeparator = React.memo(({ machineName, machineId }: { machineName: 
 export function ActiveSessionsGroupCompact({ sessions, selectedSessionId }: ActiveSessionsGroupProps) {
     const styles = stylesheet;
     const machines = useAllMachines();
+    const [collapsedMachineIds, setCollapsedMachineIds] = useLocalSettingMutable('collapsedSessionMachineIds');
 
     const machinesMap = React.useMemo(() => {
         const map: Record<string, Machine> = {};
@@ -198,7 +226,7 @@ export function ActiveSessionsGroupCompact({ sessions, selectedSessionId }: Acti
     }, [machines]);
 
     // Group sessions by machine, then by project within each machine
-    const { machineGroups, hasMultipleMachines } = React.useMemo(() => {
+    const machineGroups = React.useMemo(() => {
         const unknownText = t('status.unknown');
         const byMachine = new Map<string, {
             machineId: string;
@@ -245,25 +273,38 @@ export function ActiveSessionsGroupCompact({ sessions, selectedSessionId }: Acti
             return aIndex - bIndex || a.machineName.localeCompare(b.machineName);
         });
 
-        return { machineGroups: sorted, hasMultipleMachines: byMachine.size > 1 };
+        return sorted;
     }, [sessions, machines, machinesMap]);
+
+    const toggleMachine = React.useCallback((machineId: string) => {
+        setCollapsedMachineIds(
+            collapsedMachineIds.includes(machineId)
+                ? collapsedMachineIds.filter((id) => id !== machineId)
+                : [...collapsedMachineIds, machineId],
+        );
+    }, [collapsedMachineIds, setCollapsedMachineIds]);
 
     return (
         <View style={styles.container}>
             {machineGroups.map(machineGroup => {
+                const collapsed = collapsedMachineIds.includes(machineGroup.machineId);
                 const sortedProjects = Array.from(machineGroup.projects.entries()).sort(
                     ([, a], [, b]) => a.displayPath.localeCompare(b.displayPath)
                 );
 
                 return (
                     <React.Fragment key={machineGroup.machineId}>
-                        {hasMultipleMachines && (
-                            <MachineSeparator
-                                machineName={machineGroup.machineName}
-                                machineId={machineGroup.machineId}
-                            />
-                        )}
-                        {sortedProjects.map(([projectPath, projectGroup]) => {
+                        <MachineSeparator
+                            machineName={machineGroup.machineName}
+                            machineId={machineGroup.machineId}
+                            sessionCount={Array.from(machineGroup.projects.values()).reduce(
+                                (count, project) => count + project.sessions.length,
+                                0,
+                            )}
+                            collapsed={collapsed}
+                            onToggle={() => toggleMachine(machineGroup.machineId)}
+                        />
+                        {!collapsed && sortedProjects.map(([projectPath, projectGroup]) => {
                             const firstSession = projectGroup.sessions[0];
                             if (!firstSession) return null;
 
@@ -526,6 +567,18 @@ const stylesheet = StyleSheet.create((theme) => ({
         color: theme.colors.textSecondary,
         ...Typography.default('regular'),
         marginRight: 4,
+    },
+    machineCollapseButton: {
+        width: 28,
+        height: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    machineSessionCount: {
+        fontSize: 10,
+        color: theme.colors.textSecondary,
+        ...Typography.default('regular'),
+        marginRight: 2,
     },
     // Project card styles
     projectCard: {

@@ -154,6 +154,7 @@ export type ReducerState = {
     permissions: Map<string, StoredPermission>; // Store permission details by ID for quick lookup
     localIds: Map<string, string>;
     messageIds: Map<string, string>; // originalId -> internalId
+    streamedTextMessageIds: Map<string, string>; // stable session envelope id -> rendered text message
     messages: Map<string, ReducerMessage>;
     sidechains: Map<string, ReducerMessage[]>;
     tracerState: TracerState; // Tracer state for sidechain processing
@@ -180,6 +181,7 @@ export function createReducer(): ReducerState {
         messages: new Map(),
         localIds: new Map(),
         messageIds: new Map(),
+        streamedTextMessageIds: new Map(),
         sidechains: new Map(),
         tracerState: createTracer()
     }
@@ -305,6 +307,19 @@ export function reducer(state: ReducerState, messages: NormalizedMessage[], agen
             continue;
         }
         if (state.messageIds.has(msg.id)) {
+            const streamedMessageId = state.streamedTextMessageIds.get(msg.id);
+            const streamedMessage = streamedMessageId ? state.messages.get(streamedMessageId) : undefined;
+            const streamedContent = msg.role === 'agent' && msg.content.length === 1
+                ? msg.content[0]
+                : null;
+            if (streamedMessage?.role === 'agent' && streamedMessageId &&
+                (streamedContent?.type === 'text' || streamedContent?.type === 'thinking')) {
+                streamedMessage.text = streamedContent.type === 'thinking'
+                    ? `*${streamedContent.thinking}*`
+                    : streamedContent.text;
+                streamedMessage.isThinking = streamedContent.type === 'thinking';
+                changed.add(streamedMessageId);
+            }
             continue;
         }
 
@@ -715,6 +730,19 @@ export function reducer(state: ReducerState, messages: NormalizedMessage[], agen
             // Process text and thinking content (tool calls handled in Phase 2)
             for (let c of msg.content) {
                 if (c.type === 'text' || c.type === 'thinking') {
+                    const existingStreamMessageId = msg.id.startsWith('codex-agent:')
+                        ? state.streamedTextMessageIds.get(msg.id)
+                        : undefined;
+                    const existingStreamMessage = existingStreamMessageId
+                        ? state.messages.get(existingStreamMessageId)
+                        : undefined;
+                    if (existingStreamMessage?.role === 'agent' && existingStreamMessageId) {
+                        existingStreamMessage.text = c.type === 'thinking' ? `*${c.thinking}*` : c.text;
+                        existingStreamMessage.isThinking = c.type === 'thinking';
+                        changed.add(existingStreamMessageId);
+                        continue;
+                    }
+
                     let mid = allocateId();
                     const isThinking = c.type === 'thinking';
                     state.messages.set(mid, {
@@ -728,6 +756,9 @@ export function reducer(state: ReducerState, messages: NormalizedMessage[], agen
                         event: null,
                         meta: msg.meta,
                     });
+                    if (msg.id.startsWith('codex-agent:')) {
+                        state.streamedTextMessageIds.set(msg.id, mid);
+                    }
                     changed.add(mid);
                 }
             }

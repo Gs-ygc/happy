@@ -50,6 +50,25 @@ describe('mapCodexMcpMessageToSessionEnvelopes', () => {
         expect(result.envelopes[0].ev).toEqual({ t: 'text', text: 'hello' });
     });
 
+    it('maps streamed agent snapshots onto a stable envelope id', () => {
+        const mapped = mapCodexMcpMessageToSessionEnvelopes({
+            type: 'agent_message_delta',
+            message: 'Hello from the stream',
+            item_id: 'item-1',
+            stream_id: 'codex-agent:thread-1:item-1',
+        }, {
+            currentTurnId: 'turn-1',
+        });
+
+        expect(mapped.envelopes).toHaveLength(1);
+        expect(mapped.envelopes[0]).toMatchObject({
+            id: 'codex-agent:thread-1:item-1',
+            codexItemId: 'item-1',
+            turn: 'turn-1',
+            ev: { t: 'text', text: 'Hello from the stream' },
+        });
+    });
+
     it('maps parent call linkage to subagent field', () => {
         const result = mapCodexMcpMessageToSessionEnvelopes(
             { type: 'agent_message', message: 'subagent hello', parent_call_id: 'parent-call-1' },
@@ -405,6 +424,29 @@ describe('mapCodexMcpMessageToSessionEnvelopes', () => {
         }
     });
 
+    it('maps exec command output and failure state to tool-call-end', () => {
+        const result = mapCodexMcpMessageToSessionEnvelopes(
+            {
+                type: 'exec_command_end',
+                call_id: 'call-1',
+                output: 'test failed',
+                exit_code: 1,
+                duration_ms: 250,
+            },
+            { currentTurnId: 'turn-1' },
+        );
+
+        expect(result.envelopes).toHaveLength(1);
+        expect(result.envelopes[0].ev).toEqual({
+            t: 'tool-call-end',
+            call: 'call-1',
+            result: 'test failed',
+            isError: true,
+            exitCode: 1,
+            durationMs: 250,
+        });
+    });
+
     it('maps token_count messages to usage-only session envelopes', () => {
         const result = mapCodexMcpMessageToSessionEnvelopes(
             { type: 'token_count', total_tokens: 10 },
@@ -583,6 +625,8 @@ describe('mapCodexThreadToSessionEnvelopes', () => {
                         command: 'pnpm test',
                         cwd: '/tmp/project',
                         aggregatedOutput: 'ok',
+                        exitCode: 0,
+                        durationMs: 100,
                     },
                 ],
             }],
@@ -591,7 +635,6 @@ describe('mapCodexThreadToSessionEnvelopes', () => {
         expect(envelopes.map((envelope) => envelope.ev.t)).toEqual([
             'turn-start',
             'tool-call-start',
-            'text',
             'tool-call-end',
             'turn-end',
         ]);
@@ -603,12 +646,13 @@ describe('mapCodexThreadToSessionEnvelopes', () => {
         expect(envelopes[2]).toMatchObject({
             role: 'agent',
             turn: 'turn-1',
-            ev: { t: 'text', text: 'ok', thinking: true },
-        });
-        expect(envelopes[3]).toMatchObject({
-            role: 'agent',
-            turn: 'turn-1',
-            ev: { t: 'tool-call-end', call: 'cmd-1' },
+            ev: {
+                t: 'tool-call-end',
+                call: 'cmd-1',
+                result: 'ok',
+                exitCode: 0,
+                durationMs: 100,
+            },
         });
     });
 
@@ -797,7 +841,6 @@ describe('mapCodexThreadToSessionEnvelopes', () => {
             });
 
             expect(envelopes.map((envelope) => envelope.time)).toEqual([
-                10_000,
                 10_000,
                 10_000,
                 20_000,

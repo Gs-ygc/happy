@@ -5,6 +5,27 @@ import { reducer } from './reducer';
 import { AgentState } from '../storageTypes';
 
 describe('reducer', () => {
+    it('updates one agent message as streamed snapshots arrive', () => {
+        const state = createReducer();
+        const first: NormalizedMessage = {
+            id: 'codex-agent:stream-1',
+            localId: null,
+            createdAt: 1000,
+            role: 'agent',
+            content: [{ type: 'text', text: 'Hello', uuid: 'codex-agent:stream-1', parentUUID: null }],
+            isSidechain: false,
+        };
+        const second: NormalizedMessage = {
+            ...first,
+            content: [{ type: 'text', text: 'Hello from the stream', uuid: 'codex-agent:stream-1', parentUUID: null }],
+        };
+
+        const firstResult = reducer(state, [first]);
+        expect(firstResult.messages.map((message) => message.kind === 'agent-text' ? message.text : null)).toEqual(['Hello']);
+        const secondResult = reducer(state, [second]);
+        expect(secondResult.messages.map((message) => message.kind === 'agent-text' ? message.text : null)).toEqual(['Hello from the stream']);
+        expect(state.messages).toHaveLength(1);
+    });
     // it('should process golden cases', () => {
     //     for (let i = 0; i <= 3; i++) {
 

@@ -171,6 +171,10 @@ export const AgentGoalProgressSchema = z.object({
     currentStep: z.number().int().positive().optional(),
     totalSteps: z.number().int().positive().optional(),
     steps: z.array(AgentGoalProgressStepSchema).optional(),
+    state: z.enum(['active', 'paused', 'blocked', 'usageLimited', 'budgetLimited']).optional(),
+    tokensUsed: z.number().int().nonnegative().optional(),
+    tokenBudget: z.number().int().positive().nullable().optional(),
+    timeUsedSeconds: z.number().nonnegative().optional(),
 }).strict();
 
 export const AgentGoalCapabilitiesSchema = z.object({

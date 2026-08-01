@@ -15,7 +15,7 @@ import { PermissionFooter } from './PermissionFooter';
 import { parseToolUseError } from '@/utils/toolErrorParser';
 import { formatMCPTitle } from './views/MCPToolView';
 import { t } from '@/text';
-import { getTerminalToolCommand, getTerminalToolOutput, isTerminalToolName, shouldRenderToolCardHeader } from '@/utils/toolDisplay';
+import { getTerminalToolCommand, getTerminalToolExecutionMeta, getTerminalToolOutput, isTerminalToolName, shouldRenderToolCardHeader } from '@/utils/toolDisplay';
 
 interface ToolViewProps {
     metadata: Metadata | null;
@@ -167,6 +167,7 @@ export const ToolView = React.memo<ToolViewProps>((props) => {
     const terminalCommand = getTerminalToolCommand(tool);
     const isCompactTerminalTool = terminalCommand !== null;
     const terminalOutput = isTerminalToolName(tool.name) ? getTerminalToolOutput(tool) : null;
+    const terminalExecutionMeta = isTerminalToolName(tool.name) ? getTerminalToolExecutionMeta(tool) : null;
     const terminalOutputText = terminalOutput
         ? [terminalOutput.stdout, terminalOutput.stderr, terminalOutput.error].filter(Boolean).join('\n')
         : null;
@@ -237,9 +238,24 @@ export const ToolView = React.memo<ToolViewProps>((props) => {
                 )
             ) : null}
 
-            {terminalOutputText ? (
+            {terminalOutputText || terminalExecutionMeta ? (
                 <View style={styles.compactOutput}>
-                    <CodeView code={terminalOutputText} maxHeight={240} />
+                    <View style={styles.compactOutputHeader}>
+                        <Ionicons
+                            name={tool.state === 'error' ? 'alert-circle-outline' : 'checkmark-circle-outline'}
+                            size={14}
+                            color={tool.state === 'error' ? theme.colors.warning : theme.colors.textSecondary}
+                        />
+                        <Text style={styles.compactOutputLabel}>
+                            {tool.state === 'error' ? t('tools.fullView.error') : t('toolView.output')}
+                        </Text>
+                        {terminalExecutionMeta ? (
+                            <Text style={styles.compactOutputMeta}>
+                                {formatTerminalExecutionMeta(terminalExecutionMeta)}
+                            </Text>
+                        ) : null}
+                    </View>
+                    {terminalOutputText ? <CodeView code={terminalOutputText} maxHeight={240} /> : null}
                 </View>
             ) : null}
 
@@ -316,6 +332,17 @@ function ElapsedView(props: { from: number }) {
     return <Text style={styles.elapsedText}>{elapsed.toFixed(1)}s</Text>;
 }
 
+function formatTerminalExecutionMeta(meta: { exitCode?: number; durationMs?: number }): string {
+    const parts: string[] = [];
+    if (meta.exitCode !== undefined) {
+        parts.push(`exit ${meta.exitCode}`);
+    }
+    if (meta.durationMs !== undefined) {
+        parts.push(meta.durationMs < 1_000 ? `${Math.round(meta.durationMs)}ms` : `${(meta.durationMs / 1_000).toFixed(1)}s`);
+    }
+    return parts.join(' · ');
+}
+
 const styles = StyleSheet.create((theme) => ({
     container: {
         backgroundColor: theme.colors.surfaceHigh,
@@ -353,6 +380,27 @@ const styles = StyleSheet.create((theme) => ({
         marginHorizontal: 8,
         marginTop: 4,
         marginBottom: 6,
+    },
+    compactOutputHeader: {
+        minHeight: 24,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        paddingHorizontal: 2,
+        paddingBottom: 4,
+    },
+    compactOutputLabel: {
+        flex: 1,
+        color: theme.colors.textSecondary,
+        fontSize: 12,
+        lineHeight: 16,
+        fontWeight: '500',
+    },
+    compactOutputMeta: {
+        color: theme.colors.textSecondary,
+        fontSize: 11,
+        lineHeight: 16,
+        fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
     },
     headerLeft: {
         flexDirection: 'row',

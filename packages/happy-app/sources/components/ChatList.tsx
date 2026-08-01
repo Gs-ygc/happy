@@ -97,8 +97,8 @@ const ChatListInternal = React.memo((props: {
 
     // Collapse agent work between a user prompt and the final answer.
     // Nested tool groups remain expandable inside the work block.
-    const groupToolCalls = useSetting('groupToolCalls');
-    const showThinking = useLocalSetting('showThinking');
+    const groupToolCalls = useSetting('groupToolCalls') || props.metadata?.flavor === 'codex';
+    const showThinking = useLocalSetting('showThinking') || props.metadata?.flavor === 'codex';
     const hasPendingPermission = Boolean(
         session?.agentState?.requests && Object.keys(session.agentState.requests).length > 0,
     );

@@ -30,6 +30,10 @@ describe('getSessionNotificationTitle', () => {
     it('maps question notifications to a clarification title', () => {
         expect(getSessionNotificationTitle('question')).toBe('Clarification needed');
     });
+
+    it('maps progress notifications to a goal title', () => {
+        expect(getSessionNotificationTitle('progress')).toBe('Goal progress');
+    });
 });
 
 describe('getSessionNotificationBody', () => {

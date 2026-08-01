@@ -51,6 +51,11 @@ export type TerminalToolOutput = {
     error?: string;
 };
 
+export type TerminalToolExecutionMeta = {
+    exitCode?: number;
+    durationMs?: number;
+};
+
 export function isTerminalToolName(name: string): boolean {
     return TERMINAL_TOOL_NAMES.has(name);
 }
@@ -167,12 +172,9 @@ export function getTerminalToolOutput(tool: Pick<ToolCall, 'state' | 'result'>):
         return null;
     }
 
-    if (tool.state === 'error') {
-        return { error: stringifyToolResult(tool.result) };
-    }
-
     if (typeof tool.result === 'string') {
-        return tool.result.trim().length > 0 ? { stdout: tool.result } : null;
+        if (tool.result.trim().length === 0) return null;
+        return tool.state === 'error' ? { error: tool.result } : { stdout: tool.result };
     }
 
     if (typeof tool.result === 'object') {
@@ -185,11 +187,32 @@ export function getTerminalToolOutput(tool: Pick<ToolCall, 'state' | 'result'>):
         const error = getOutputText(result.error);
 
         if (stdout || stderr || error) {
-            return { stdout, stderr, error };
+            return tool.state === 'error'
+                ? { stderr, error: error ?? stdout }
+                : { stdout, stderr, error };
+        }
+
+        // The session protocol wraps exit metadata with the output. A command
+        // that produced no text should show its exit status, not the wrapper
+        // object serialized as fake stdout.
+        if (typeof result.exitCode === 'number' || typeof result.durationMs === 'number') {
+            return null;
         }
     }
 
-    return { stdout: stringifyToolResult(tool.result) };
+    const fallback = stringifyToolResult(tool.result);
+    return tool.state === 'error' ? { error: fallback } : { stdout: fallback };
+}
+
+export function getTerminalToolExecutionMeta(tool: Pick<ToolCall, 'result'>): TerminalToolExecutionMeta | null {
+    if (!tool.result || typeof tool.result !== 'object' || Array.isArray(tool.result)) {
+        return null;
+    }
+
+    const result = tool.result as Record<string, unknown>;
+    const exitCode = typeof result.exitCode === 'number' ? result.exitCode : undefined;
+    const durationMs = typeof result.durationMs === 'number' ? result.durationMs : undefined;
+    return exitCode !== undefined || durationMs !== undefined ? { exitCode, durationMs } : null;
 }
 
 function getOutputText(value: unknown): string | undefined {

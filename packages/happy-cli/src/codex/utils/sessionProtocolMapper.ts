@@ -572,6 +572,11 @@ function emitHistoricalToolCall(
         startedAt: number;
         completedAt: number;
     },
+    execution?: {
+        isError?: boolean;
+        exitCode?: number | null;
+        durationMs?: number | null;
+    },
 ): void {
     const time = timestamps?.startedAt ?? turnTimestampMs(turn);
     const opts = { turn: turn.id, time, codexItemId: item.id } satisfies CreateEnvelopeOptions;
@@ -587,20 +592,13 @@ function emitHistoricalToolCall(
         id: `${item.id}:start`,
     }));
 
-    if (output && output.trim().length > 0) {
-        envelopes.push(createEnvelope('agent', {
-            t: 'text',
-            text: output,
-            thinking: true,
-        }, {
-            ...opts,
-            id: `${item.id}:output`,
-        }));
-    }
-
     envelopes.push(createEnvelope('agent', {
         t: 'tool-call-end',
         call: item.id,
+        ...(output && output.trim().length > 0 ? { result: output } : {}),
+        ...(execution?.isError ? { isError: true } : {}),
+        ...(execution?.exitCode !== undefined ? { exitCode: execution.exitCode } : {}),
+        ...(execution?.durationMs !== undefined ? { durationMs: execution.durationMs } : {}),
     }, {
         ...opts,
         id: `${item.id}:end`,
@@ -679,6 +677,8 @@ export function mapCodexThreadItemToSessionEnvelopes(
         case 'commandExecution': {
             const envelopes: SessionEnvelope[] = [];
             const command = typeof item.command === 'string' ? item.command : '';
+            const exitCode = typeof item.exitCode === 'number' ? item.exitCode : null;
+            const durationMs = typeof item.durationMs === 'number' ? item.durationMs : null;
             emitHistoricalToolCall(
                 envelopes,
                 turn,
@@ -688,6 +688,11 @@ export function mapCodexThreadItemToSessionEnvelopes(
                 { command, cwd: item.cwd },
                 typeof item.aggregatedOutput === 'string' ? item.aggregatedOutput : null,
                 { startedAt, completedAt },
+                {
+                    isError: exitCode !== null && exitCode !== 0,
+                    ...(exitCode !== null ? { exitCode } : {}),
+                    ...(durationMs !== null ? { durationMs } : {}),
+                },
             );
             return envelopes;
         }
@@ -724,6 +729,7 @@ export function mapCodexThreadItemToSessionEnvelopes(
                 },
                 output,
                 { startedAt, completedAt },
+                { isError: item.error !== undefined && item.error !== null },
             );
             return envelopes;
         }
@@ -1106,8 +1112,11 @@ export function mapCodexMcpMessageToSessionEnvelopes(message: Record<string, unk
     const subagent = resolveSessionSubagent(message, providerSubagentToSessionSubagent);
     const opts = buildEnvelopeOptions(state.currentTurnId, subagent);
 
-    if (type === 'agent_message') {
-        if (typeof message.message !== 'string') {
+    if (type === 'agent_message' || type === 'agent_message_delta') {
+        const text = typeof message.message === 'string'
+            ? message.message
+            : (typeof message.delta === 'string' ? message.delta : null);
+        if (text === null) {
             return {
                 currentTurnId: state.currentTurnId,
                 startedSubagents,
@@ -1122,7 +1131,13 @@ export function mapCodexMcpMessageToSessionEnvelopes(message: Record<string, unk
 
         const envelopes: SessionEnvelope[] = [];
         maybeEmitSubagentStart(subagent, opts, startedSubagents, activeSubagents, subagentTitles, envelopes);
-        envelopes.push(createEnvelope('agent', { t: 'text', text: message.message }, opts));
+        const streamId = pickString(message.stream_id ?? message.streamId);
+        const itemId = pickString(message.item_id ?? message.itemId);
+        envelopes.push(createEnvelope('agent', { t: 'text', text }, {
+            ...opts,
+            ...(streamId ? { id: streamId } : {}),
+            ...(itemId ? { codexItemId: itemId } : {}),
+        }));
         return {
             currentTurnId: state.currentTurnId,
             startedSubagents,
@@ -1206,9 +1221,20 @@ export function mapCodexMcpMessageToSessionEnvelopes(message: Record<string, unk
 
     if (type === 'exec_command_end') {
         const call = pickCallId(message);
+        const output = typeof message.output === 'string' ? message.output : undefined;
+        const exitCode = typeof message.exit_code === 'number' ? message.exit_code : null;
+        const durationMs = typeof message.duration_ms === 'number' ? message.duration_ms : null;
+        const isError = exitCode !== null && exitCode !== 0;
         const envelopes: SessionEnvelope[] = [];
         maybeEmitSubagentStart(subagent, opts, startedSubagents, activeSubagents, subagentTitles, envelopes);
-        envelopes.push(createEnvelope('agent', { t: 'tool-call-end', call }, opts));
+        envelopes.push(createEnvelope('agent', {
+            t: 'tool-call-end',
+            call,
+            ...(output ? { result: output } : {}),
+            ...(isError ? { isError: true } : {}),
+            exitCode,
+            durationMs,
+        }, opts));
         return {
             currentTurnId: state.currentTurnId,
             startedSubagents,

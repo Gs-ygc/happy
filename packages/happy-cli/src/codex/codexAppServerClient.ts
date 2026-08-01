@@ -252,6 +252,8 @@ export class CodexAppServerClient {
     private completedTurnIds = new Set<string>();
     private rawFileChangesByItemId = new Map<string, LegacyPatchChanges>();
     private rawSubagentActivitySignaturesByItemId = new Map<string, Set<string>>();
+    private rawAgentMessageTextByItemId = new Map<string, string>();
+    private rawAgentMessageLastEmitAtByItemId = new Map<string, number>();
     // Approval callIds currently awaiting an answer. One codex item can raise
     // several approval callbacks (approvalId exists to disambiguate them);
     // the bare scoped key is kept for the first so the app's permission ↔
@@ -428,6 +430,35 @@ export class CodexAppServerClient {
             return true;
         }
 
+        if (method === 'item/agentMessage/delta') {
+            const itemId = stringOrNull(params?.itemId ?? params?.item_id);
+            const delta = typeof params?.delta === 'string' ? params.delta : '';
+            if (!itemId || delta.length === 0) {
+                return true;
+            }
+
+            const threadId = stringOrNull(params?.threadId ?? params?.thread_id);
+            const streamKey = formatScopedItemKey(threadId, itemId);
+            const text = `${this.rawAgentMessageTextByItemId.get(streamKey) ?? ''}${delta}`;
+            this.rawAgentMessageTextByItemId.set(streamKey, text);
+
+            // Coalesce token-sized notifications so a long answer does not
+            // turn into one encrypted network write per token. The completed
+            // item always emits the authoritative final snapshot.
+            const now = Date.now();
+            const lastEmitAt = this.rawAgentMessageLastEmitAtByItemId.get(streamKey) ?? 0;
+            if (lastEmitAt === 0 || now - lastEmitAt >= 120) {
+                this.rawAgentMessageLastEmitAtByItemId.set(streamKey, now);
+                this.eventHandler?.({
+                    type: 'agent_message_delta',
+                    message: text,
+                    item_id: itemId,
+                    stream_id: `codex-agent:${streamKey}`,
+                });
+            }
+            return true;
+        }
+
         const item = params?.item;
         if (!item || typeof item !== 'object') {
             return method.startsWith('item/');
@@ -572,14 +603,26 @@ export class CodexAppServerClient {
         }
 
         if (method === 'item/completed' && item.type === 'agentMessage') {
-            const text = typeof item.text === 'string' ? item.text : '';
+            const itemId = typeof item.id === 'string' ? item.id : '';
+            const threadId = stringOrNull(params?.threadId ?? params?.thread_id);
+            const streamKey = itemId ? formatScopedItemKey(threadId, itemId) : '';
+            const streamedText = streamKey ? this.rawAgentMessageTextByItemId.get(streamKey) : undefined;
+            const text = typeof item.text === 'string' && item.text.length > 0
+                ? item.text
+                : (streamedText ?? '');
             if (text.length > 0) {
                 this.eventHandler?.({
                     type: 'agent_message',
                     message: text,
                     item_id: item.id,
+                    ...(streamKey ? { stream_id: `codex-agent:${streamKey}` } : {}),
                     phase: item.phase,
                 });
+            }
+
+            if (streamKey) {
+                this.rawAgentMessageTextByItemId.delete(streamKey);
+                this.rawAgentMessageLastEmitAtByItemId.delete(streamKey);
             }
 
             if (item.phase === 'final_answer' && this.pendingTurnCompletion) {

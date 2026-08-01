@@ -2683,10 +2683,11 @@ class Sync {
             }
         }
 
-        // Session-level lifecycle event (Claude finished, needs permission, asks question).
+        // Session-level lifecycle event (agent finished, needs permission, asks question).
         // This is the same signal that triggers the mobile push — bump browser-tab
-        // unread counter on these only, ignore the noisy per-message stream.
-        if (updateData.type === 'session-event') {
+        // unread counter only for events that require attention. Goal progress is
+        // informational and must not make the session look unread on every update.
+        if (updateData.type === 'session-event' && updateData.kind !== 'progress') {
             notifyUnreadMessage();
         }
 

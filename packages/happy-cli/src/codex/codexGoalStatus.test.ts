@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     codexGoalActionCapabilities,
+    formatCodexGoalProgressNotification,
+    getCodexGoalProgressSnapshot,
     mapCodexGoalEventToAgentGoalStatus,
     parseCodexGoalActionParams,
     parseCodexGoalCommand,
+    shouldNotifyCodexGoalProgress,
 } from './codexGoalStatus';
 
 describe('mapCodexGoalEventToAgentGoalStatus', () => {
@@ -33,9 +36,82 @@ describe('mapCodexGoalEventToAgentGoalStatus', () => {
             sourceRevision: 1781680007,
             status: 'active',
             text: 'finish the release',
+            progress: {
+                state: 'active',
+                tokensUsed: 42,
+                timeUsedSeconds: 7,
+            },
         });
 
         vi.useRealTimers();
+    });
+
+    it('formats goal progress for notifications', () => {
+        const status = mapCodexGoalEventToAgentGoalStatus({
+            type: 'thread_goal_updated',
+            threadId: 'thread-1',
+            goal: {
+                threadId: 'thread-1',
+                objective: 'finish the release',
+                status: 'blocked',
+                tokenBudget: 5000,
+                tokensUsed: 1250,
+                timeUsedSeconds: 125,
+                createdAt: 1,
+                updatedAt: 2,
+            },
+        }, 'thread-1');
+
+        expect(status && formatCodexGoalProgressNotification(status)).toBe(
+            'finish the release · blocked · 1.3k/5.0k tokens · 2m elapsed',
+        );
+    });
+
+    it('throttles routine progress but immediately reports state changes', () => {
+        const previous = {
+            state: 'active',
+            tokenBudget: 100_000,
+            tokensUsed: 10_000,
+            timeUsedSeconds: 600,
+        };
+
+        expect(shouldNotifyCodexGoalProgress(previous, {
+            ...previous,
+            tokensUsed: 19_999,
+            timeUsedSeconds: 1_499,
+        }, 20 * 60 * 1000)).toBe(false);
+        expect(shouldNotifyCodexGoalProgress(previous, {
+            ...previous,
+            tokensUsed: 20_000,
+        }, 9 * 60 * 1000)).toBe(false);
+        expect(shouldNotifyCodexGoalProgress(previous, {
+            ...previous,
+            tokensUsed: 20_000,
+        }, 10 * 60 * 1000)).toBe(true);
+        expect(shouldNotifyCodexGoalProgress(previous, {
+            ...previous,
+            state: 'blocked',
+        }, 1_000)).toBe(true);
+    });
+
+    it('preserves missing progress metrics instead of inventing zeros', () => {
+        const status = mapCodexGoalEventToAgentGoalStatus({
+            type: 'thread_goal_updated',
+            threadId: 'thread-1',
+            goal: {
+                objective: 'finish the release',
+                status: 'active',
+                updatedAt: 2,
+            },
+        }, 'thread-1');
+
+        expect(status && getCodexGoalProgressSnapshot(status)).toEqual({
+            state: 'active',
+            tokensUsed: undefined,
+            tokenBudget: undefined,
+            timeUsedSeconds: undefined,
+        });
+        expect(status && formatCodexGoalProgressNotification(status)).toBe('finish the release');
     });
 
     it('adds explicit capabilities only when the adapter reports support', () => {

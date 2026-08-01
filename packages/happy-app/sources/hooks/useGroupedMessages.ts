@@ -353,9 +353,11 @@ const TOOL_CATEGORIES: Record<string, string> = {
 /** Generate a human-readable summary of tools in a group */
 export function generateGroupSummary(messages: Message[]): string {
     const counts: Record<string, number> = {};
+    let toolCount = 0;
 
     for (const msg of messages) {
         if (msg.kind === 'tool-call') {
+            toolCount++;
             const category = TOOL_CATEGORIES[msg.tool.name] || 'other';
             counts[category] = (counts[category] || 0) + 1;
         }
@@ -371,7 +373,7 @@ export function generateGroupSummary(messages: Message[]): string {
     if (counts.task) parts.push(t('toolGroup.ranTasks', { count: counts.task }));
     if (counts.other) parts.push(t('toolGroup.usedTools', { count: counts.other }));
 
-    return parts.join(', ') || t('toolGroup.usedTools', { count: messages.length });
+    return parts.join(', ') || (toolCount > 0 ? t('toolGroup.usedTools', { count: toolCount }) : '');
 }
 
 export function formatWorkDuration(durationMs: number): string {
