@@ -1720,17 +1720,21 @@ class Sync {
                 return;
             }
 
+            const currentVersionCode = Platform.OS === 'android'
+                ? Number(Application.nativeBuildVersion ?? Constants.expoConfig?.android?.versionCode)
+                : undefined;
+
             if (Platform.OS === 'android') {
                 const runtimeVersion = typeof Constants.expoConfig?.runtimeVersion === 'string'
                     ? Constants.expoConfig.runtimeVersion
                     : null;
-                const currentVersionCode = Number(
+                const androidVersionCode = Number(
                     Application.nativeBuildVersion ?? Constants.expoConfig?.android?.versionCode,
                 );
 
-                if (runtimeVersion && Number.isSafeInteger(currentVersionCode)) {
+                if (runtimeVersion && Number.isSafeInteger(androidVersionCode)) {
                     try {
-                        const githubUpdate = await fetchGitHubNativeUpdate(runtimeVersion, currentVersionCode);
+                        const githubUpdate = await fetchGitHubNativeUpdate(runtimeVersion, androidVersionCode);
                         storage.getState().applyNativeUpdateStatus(githubUpdate
                             ? { available: true, updateUrl: githubUpdate.downloadUrl }
                             : { available: false });
@@ -1758,6 +1762,7 @@ class Sync {
                     platform,
                     version,
                     app_id: appId,
+                    version_code: currentVersionCode,
                 }),
             });
 
@@ -1769,11 +1774,16 @@ class Sync {
             const data = await response.json();
             console.log('[fetchNativeUpdate] Data:', data);
 
-            // Apply update status to storage
-            if (data.update_required && data.update_url) {
+            // Accept both legacy snake_case (update_required/update_url) and
+            // current camelCase (updateUrl) shapes from the server.
+            const updateUrl = data.update_url ?? data.updateUrl ?? null;
+            const updateRequired = (data.update_required === true)
+                || (typeof data.updateUrl === 'string' && data.updateUrl.length > 0);
+
+            if (updateUrl && updateRequired) {
                 storage.getState().applyNativeUpdateStatus({
                     available: true,
-                    updateUrl: data.update_url
+                    updateUrl,
                 });
             } else {
                 storage.getState().applyNativeUpdateStatus({
