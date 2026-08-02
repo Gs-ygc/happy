@@ -719,7 +719,21 @@ export const storage = create<StorageState>()((set, get) => {
                     && !equal(session?.latestUsage, nextUsage);
                 const planModeChanged = shouldEnterPlanMode
                     && session?.permissionMode !== 'plan';
-                const needsUpdate = session && (todosChanged || usageChanged || planModeChanged);
+                // New input/output is real activity: keep session.updatedAt in sync
+                // so the Task Center idle window tracks message activity even
+                // between /v1/sessions refetches. (Heartbeat writes never touch
+                // updatedAt, so this stays a true "last activity" signal.)
+                let activityChanged = false;
+                let newestCreatedAt = 0;
+                if (session) {
+                    for (const msg of processedMessages) {
+                        if (msg.createdAt > newestCreatedAt) {
+                            newestCreatedAt = msg.createdAt;
+                        }
+                    }
+                    activityChanged = newestCreatedAt > session.updatedAt;
+                }
+                const needsUpdate = session && (todosChanged || usageChanged || planModeChanged || activityChanged);
 
                 if (needsUpdate) {
                     updatedSessions = {
@@ -730,7 +744,8 @@ export const storage = create<StorageState>()((set, get) => {
                             // Copy latestUsage from reducerState to make it immediately available
                             ...(usageChanged && nextUsage ? { latestUsage: { ...nextUsage } } : {}),
                             // Auto-switch to plan mode when EnterPlanMode tool call is detected
-                            ...(planModeChanged && { permissionMode: 'plan' })
+                            ...(planModeChanged && { permissionMode: 'plan' }),
+                            ...(activityChanged && { updatedAt: newestCreatedAt })
                         }
                     };
                 }

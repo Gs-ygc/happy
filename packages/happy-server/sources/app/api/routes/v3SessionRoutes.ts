@@ -208,6 +208,16 @@ export function v3SessionRoutes(app: Fastify) {
 
             const responseMessages = [...existing, ...createdMessages].sort((a, b) => a.seq - b.seq);
 
+            if (newMessages.length > 0) {
+                // New input/output is real activity: bump the session's updatedAt so
+                // the app's idle window tracks message activity. (Heartbeat writes
+                // use raw SQL and never touch updatedAt.)
+                await tx.session.update({
+                    where: { id: sessionId },
+                    data: { updatedAt: new Date() }
+                });
+            }
+
             return {
                 responseMessages,
                 createdMessages

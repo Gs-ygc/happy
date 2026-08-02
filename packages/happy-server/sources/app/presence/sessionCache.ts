@@ -191,11 +191,19 @@ class ActivityCache {
         // Batch update sessions
         if (sessionUpdates.length > 0) {
             try {
+                // Heartbeats (session-alive every 2s, throttled to 30s DB writes)
+                // are NOT real activity: a connected-but-idle daemon must not keep a
+                // session looking active. Prisma's @updatedAt auto-bumps on every
+                // update()/updateMany(), so persist lastActiveAt/active with raw SQL
+                // and leave updatedAt untouched. updatedAt then only moves on real
+                // activity (message create, metadata/agent-state changes, session
+                // end) and the app's idle-window filtering works as intended.
                 await Promise.all(sessionUpdates.map(update =>
-                    db.session.update({
-                        where: { id: update.id },
-                        data: { lastActiveAt: new Date(update.timestamp), active: true }
-                    })
+                    db.$executeRawUnsafe(
+                        'UPDATE "Session" SET "lastActiveAt" = $1, "active" = true WHERE "id" = $2',
+                        new Date(update.timestamp),
+                        update.id
+                    )
                 ));
                 
                 log({ module: 'session-cache' }, `Flushed ${sessionUpdates.length} session updates`);

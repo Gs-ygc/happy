@@ -82,8 +82,17 @@ export function isTaskActivelyWorking(session: Session, now: number = Date.now()
     if (hasPendingRequests || session.thinking) {
         return true;
     }
-    // Heartbeats never touch updatedAt, so it only moves on real activity
-    // (messages, metadata, agent state changes).
+    // Goal-mode long tasks stay active even between messages: the agent is
+    // still pursuing an in-progress goal (agentGoalStatus.status === 'active'
+    // with an online daemon), which can run longer than the idle window
+    // without emitting a message or a state change.
+    if (resolveVisibleAgentGoalStatus(session) !== null) {
+        return true;
+    }
+    // updatedAt only moves on real activity: the server bumps it on message
+    // create and metadata/agent-state changes, and heartbeat writes use raw
+    // SQL that never touches it. So this window filters out sessions that are
+    // merely connected but had no input/output for the idle window.
     return now - session.updatedAt < TASK_IDLE_TIMEOUT_MS;
 }
 

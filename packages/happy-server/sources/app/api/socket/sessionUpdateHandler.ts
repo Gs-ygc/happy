@@ -231,6 +231,14 @@ export function sessionUpdateHandler(userId: string, socket: Socket, connection:
                     }
                 });
 
+                // New input/output is real activity: bump the session's updatedAt so
+                // the app's idle window tracks message activity. (Heartbeat writes
+                // use raw SQL and never touch updatedAt.)
+                await db.session.update({
+                    where: { id: sid },
+                    data: { updatedAt: new Date() }
+                });
+
                 // Emit new message update to relevant clients
                 const updatePayload = buildNewMessageUpdate(msg, sid, updSeq, randomKeyNaked(12));
                 eventRouter.emitUpdate({
