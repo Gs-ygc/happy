@@ -60,6 +60,8 @@ export type Sub2ApiUsage = {
     fetchedAt: number;
 };
 
+export type Sub2ApiPeriod = 'today' | '7d' | '30d' | 'all';
+
 // Kept for the existing chart component and older callers.
 export interface UsageDataPoint {
     timestamp: number;
@@ -128,14 +130,50 @@ async function login(config: Sub2ApiConfig): Promise<string> {
     return data.access_token;
 }
 
-function todayRange(now = new Date()): { startDate: string; endDate: string } {
+export function getSub2ApiDateRange(now = new Date(), days: number | 'all' = 7): { startDate: string; endDate: string } {
     const toDate = (date: Date) => {
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const day = String(date.getDate()).padStart(2, '0');
         return `${year}-${month}-${day}`;
     };
-    return { startDate: toDate(now), endDate: toDate(now) };
+    const end = new Date(now);
+    const start = new Date(now);
+    if (days === 'all') {
+        start.setFullYear(2000, 0, 1);
+    } else {
+        start.setDate(start.getDate() - Math.max(0, days - 1));
+    }
+    return { startDate: toDate(start), endDate: toDate(end) };
+}
+
+function getPeriodDays(period: Sub2ApiPeriod): number | 'all' {
+    if (period === 'today') return 1;
+    if (period === '7d') return 7;
+    if (period === '30d') return 30;
+    return 'all';
+}
+
+function summarizeTrend(trend: Sub2ApiDailyUsage[]): Sub2ApiUsage['today'] {
+    return trend.reduce((total, day) => ({
+        requests: total.requests + day.requests,
+        inputTokens: total.inputTokens + day.input_tokens,
+        outputTokens: total.outputTokens + day.output_tokens,
+        cacheCreationTokens: total.cacheCreationTokens + day.cache_creation_tokens,
+        cacheReadTokens: total.cacheReadTokens + day.cache_read_tokens,
+        totalTokens: total.totalTokens + day.total_tokens,
+        cost: total.cost + day.cost,
+        actualCost: total.actualCost + day.actual_cost,
+    }), {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        totalTokens: 0,
+        cost: 0,
+        actualCost: 0,
+    });
 }
 
 export async function loadSub2ApiConfig(): Promise<Sub2ApiConfig | null> {
@@ -202,12 +240,12 @@ export function normalizeSub2ApiUsage(input: {
     };
 }
 
-export async function fetchSub2ApiUsage(config: Sub2ApiConfig): Promise<Sub2ApiUsage> {
+export async function fetchSub2ApiUsage(config: Sub2ApiConfig, period: Sub2ApiPeriod = 'today'): Promise<Sub2ApiUsage> {
     const baseUrl = normalizeBaseUrl(config.baseUrl);
     const token = await login({ ...config, baseUrl });
     const headers = { Authorization: `Bearer ${token}` };
-    const { startDate, endDate } = todayRange();
-    const params = `?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+    const range = getSub2ApiDateRange(new Date(), getPeriodDays(period));
+    const params = `?start_date=${encodeURIComponent(range.startDate)}&end_date=${encodeURIComponent(range.endDate)}`;
 
     const [user, stats, models, trend] = await Promise.all([
         requestJson<Sub2ApiUser>(`${baseUrl}/api/v1/auth/me`, { headers }),
@@ -216,10 +254,16 @@ export async function fetchSub2ApiUsage(config: Sub2ApiConfig): Promise<Sub2ApiU
         requestJson<{ trend?: Sub2ApiDailyUsage[] }>(`${baseUrl}/api/v1/admin/dashboard/trend${params}&granularity=day`, { headers }),
     ]);
 
-    return normalizeSub2ApiUsage({
+    const trendRows = trend?.trend || [];
+    const normalized = normalizeSub2ApiUsage({
         user,
         stats,
         models: models?.models || [],
-        trend: trend?.trend || [],
+        trend: trendRows,
     });
+    if (period !== 'today') {
+        normalized.today = summarizeTrend(trendRows);
+    }
+
+    return normalized;
 }

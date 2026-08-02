@@ -1,6 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('expo-secure-store', () => ({ getItemAsync: vi.fn(), setItemAsync: vi.fn(), deleteItemAsync: vi.fn() }));
-import { normalizeSub2ApiUsage } from './apiUsage';
+import { getSub2ApiDateRange, normalizeSub2ApiUsage } from './apiUsage';
+
+describe('getSub2ApiDateRange', () => {
+    it('returns an inclusive local date range', () => {
+        expect(getSub2ApiDateRange(new Date(2026, 7, 2), 7)).toEqual({
+            startDate: '2026-07-27',
+            endDate: '2026-08-02',
+        });
+        expect(getSub2ApiDateRange(new Date(2026, 7, 2), 'all')).toEqual({
+            startDate: '2000-01-01',
+            endDate: '2026-08-02',
+        });
+    });
+});
 
 describe('normalizeSub2ApiUsage', () => {
     it('maps Sub2API dashboard fields into the mobile usage view', () => {

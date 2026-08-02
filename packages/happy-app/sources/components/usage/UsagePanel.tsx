@@ -13,6 +13,7 @@ import {
     loadSub2ApiConfig,
     saveSub2ApiConfig,
     type Sub2ApiConfig,
+    type Sub2ApiPeriod,
     type Sub2ApiUsage,
 } from '@/sync/apiUsage';
 
@@ -40,6 +41,10 @@ const sub2ApiText = {
     cacheTokens: '缓存 Token',
     requests: '请求数',
     recentDays: '近期每日用量',
+    periodToday: '今日',
+    period7d: '近 7 日',
+    period30d: '近 30 日',
+    periodAll: '全部',
 };
 
 const styles = StyleSheet.create((theme) => ({
@@ -61,6 +66,11 @@ const styles = StyleSheet.create((theme) => ({
     modelMeta: { color: theme.colors.textSecondary, fontSize: 12, marginTop: 4 },
     toolbar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
     toolbarText: { color: theme.colors.textSecondary, fontSize: 12 },
+    periodRow: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 8, gap: 8 },
+    periodButton: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 8, backgroundColor: theme.colors.surface },
+    periodButtonActive: { backgroundColor: theme.colors.textLink },
+    periodButtonText: { color: theme.colors.textSecondary, fontSize: 12, fontWeight: '600' },
+    periodButtonTextActive: { color: '#FFFFFF' },
     error: { alignItems: 'center', padding: 32, gap: 10 },
     errorText: { color: theme.colors.status.error, textAlign: 'center' },
     empty: { color: theme.colors.textSecondary, textAlign: 'center', padding: 20 },
@@ -112,8 +122,9 @@ export const UsagePanel: React.FC = () => {
     const [loading, setLoading] = React.useState(true);
     const [saving, setSaving] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
+    const [period, setPeriod] = React.useState<Sub2ApiPeriod>('today');
 
-    const load = React.useCallback(async (nextConfig?: Sub2ApiConfig | null) => {
+    const load = React.useCallback(async (nextConfig?: Sub2ApiConfig | null, nextPeriod: Sub2ApiPeriod = period) => {
         const activeConfig = nextConfig === undefined ? await loadSub2ApiConfig() : nextConfig;
         setConfig(activeConfig);
         if (!activeConfig) {
@@ -124,16 +135,16 @@ export const UsagePanel: React.FC = () => {
         setLoading(true);
         setError(null);
         try {
-            setUsage(await fetchSub2ApiUsage(activeConfig));
+            setUsage(await fetchSub2ApiUsage(activeConfig, nextPeriod));
         } catch (cause) {
             setUsage(null);
             setError(cause instanceof Error ? cause.message : sub2ApiText.loadFailed);
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [period]);
 
-    React.useEffect(() => { void load(); }, [load]);
+    React.useEffect(() => { void load(undefined, period); }, [load, period]);
 
     const configure = React.useCallback(async () => {
         setSaving(true);
@@ -141,13 +152,13 @@ export const UsagePanel: React.FC = () => {
             const nextConfig = await promptForConfig(config || undefined);
             if (!nextConfig) return;
             await saveSub2ApiConfig(nextConfig);
-            await load(nextConfig);
+            await load(nextConfig, period);
         } catch (cause) {
             setError(cause instanceof Error ? cause.message : sub2ApiText.saveFailed);
         } finally {
             setSaving(false);
         }
-    }, [config, load]);
+    }, [config, load, period]);
 
     const disconnect = React.useCallback(async () => {
         await clearSub2ApiConfig();
@@ -179,6 +190,13 @@ export const UsagePanel: React.FC = () => {
 
     const today = usage?.today;
     const models = [...(usage?.models || [])].sort((a, b) => b.actual_cost - a.actual_cost);
+    const periodLabel = period === 'today'
+        ? sub2ApiText.periodToday
+        : period === '7d'
+            ? sub2ApiText.period7d
+            : period === '30d'
+                ? sub2ApiText.period30d
+                : sub2ApiText.periodAll;
     return <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <View style={styles.toolbar}>
             <Text style={styles.toolbarText}>{config.email}</Text>
@@ -186,12 +204,24 @@ export const UsagePanel: React.FC = () => {
                 {loading ? <ActivityIndicator size="small" color={theme.colors.textLink} /> : <Ionicons name="refresh" size={20} color={theme.colors.textLink} />}
             </Pressable>
         </View>
+        <View style={styles.periodRow}>
+            {([
+                ['today', sub2ApiText.periodToday],
+                ['7d', sub2ApiText.period7d],
+                ['30d', sub2ApiText.period30d],
+                ['all', sub2ApiText.periodAll],
+            ] as const).map(([key, label]) => (
+                <Pressable key={key} accessibilityRole="button" accessibilityState={{ selected: period === key }} style={[styles.periodButton, period === key && styles.periodButtonActive]} onPress={() => setPeriod(key)}>
+                    <Text style={[styles.periodButtonText, period === key && styles.periodButtonTextActive]}>{label}</Text>
+                </Pressable>
+            ))}
+        </View>
         <View style={styles.hero}>
             <Text style={styles.heroLabel}>{sub2ApiText.balance}</Text>
             <Text style={styles.balance}>{formatMoney(usage?.user.balance || 0)}</Text>
             <Text style={styles.balanceMeta}>{sub2ApiText.frozenBalance}: {formatMoney(usage?.user.frozen_balance || 0)}</Text>
         </View>
-        <ItemGroup title={t('usage.today')}>
+        <ItemGroup title={periodLabel}>
             <View style={styles.statGrid}>
                 <Metric label={sub2ApiText.requests} value={formatNumber(today?.requests || 0)} />
                 <Metric label={sub2ApiText.actualCost} value={formatMoney(today?.actualCost || 0)} detail={`${sub2ApiText.standardCost}: ${formatMoney(today?.cost || 0)}`} />
