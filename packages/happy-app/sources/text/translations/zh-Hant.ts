@@ -1048,6 +1048,7 @@ export const zhHant: TranslationStructure = {
         statusThinking: '思考中',
         statusPermission: '等待權限',
         statusRunning: '執行中',
+        statusIdle: '閒置中',
         collapseGroup: '摺疊群組',
         expandGroup: '展開群組',
     },

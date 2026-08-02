@@ -1078,6 +1078,7 @@ export const pl: TranslationStructure = {
         statusThinking: 'Myśli',
         statusPermission: 'Wymagana zgoda',
         statusRunning: 'W trakcie',
+        statusIdle: 'Bezczynny',
         collapseGroup: 'Zwiń grupę',
         expandGroup: 'Rozwiń grupę',
     },

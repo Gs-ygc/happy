@@ -24,6 +24,9 @@ export interface TaskItem {
     updatedAt: number;
     createdAt: number;
     isPinned: boolean;
+    /** True when the daemon is alive and connected (regardless of activity). */
+    isOnline: boolean;
+    /** True when the task belongs in the Running section (online + active work). */
     isRunning: boolean;
 }
 
@@ -46,11 +49,42 @@ export interface TaskCenterData {
 export const OTHER_PROJECT_KEY = '__other__';
 
 /**
- * A session counts as "running" when it is active AND the daemon reports it
- * online. Presence is "online" while active, or a last-seen timestamp.
+ * How long a session can go without real activity (messages / state changes)
+ * before it is considered idle, even though the daemon is still connected.
+ * The CLI heartbeats every 2 seconds regardless of activity, so aliveness
+ * alone does not mean the agent is actually doing something.
  */
-export function isTaskRunning(session: Pick<Session, 'active' | 'presence'>): boolean {
+export const TASK_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+
+/**
+ * A session is "online" when it is active AND the daemon reports it online.
+ * Presence is "online" while active, or a last-seen timestamp.
+ */
+export function isTaskOnline(session: Pick<Session, 'active' | 'presence'>): boolean {
     return session.active && session.presence === 'online';
+}
+
+/**
+ * True when the agent is actually working (thinking, waiting for a permission
+ * decision) or has seen real activity within the idle window.
+ */
+export function isTaskActivelyWorking(session: Session, now: number = Date.now()): boolean {
+    const hasPendingRequests = !!(session.agentState?.requests && Object.keys(session.agentState.requests).length > 0);
+    if (hasPendingRequests || session.thinking) {
+        return true;
+    }
+    // Heartbeats never touch updatedAt, so it only moves on real activity
+    // (messages, metadata, agent state changes).
+    return now - session.updatedAt < TASK_IDLE_TIMEOUT_MS;
+}
+
+/**
+ * A task belongs in the Running section when the session is online AND
+ * actively working. Online sessions that have been idle for a long time fall
+ * back to the project groups (still marked online, see TaskItem.isOnline).
+ */
+export function isTaskRunning(session: Session, now: number = Date.now()): boolean {
+    return isTaskOnline(session) && isTaskActivelyWorking(session, now);
 }
 
 /**
@@ -77,6 +111,8 @@ export function buildTaskItem(
     pinnedSessionIds: ReadonlySet<string>,
 ): TaskItem {
     const machineId = session.metadata?.machineId ?? null;
+    const isOnline = isTaskOnline(session);
+    const isRunning = isOnline && isTaskActivelyWorking(session);
     return {
         sessionId: session.id,
         path: session.metadata?.path ?? null,
@@ -87,7 +123,8 @@ export function buildTaskItem(
         updatedAt: session.updatedAt,
         createdAt: session.createdAt,
         isPinned: pinnedSessionIds.has(session.id),
-        isRunning: isTaskRunning(session),
+        isOnline,
+        isRunning,
     };
 }
 

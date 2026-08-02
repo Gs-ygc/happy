@@ -1077,6 +1077,7 @@ export const ru: TranslationStructure = {
         statusThinking: 'Думает',
         statusPermission: 'Требуется разрешение',
         statusRunning: 'Выполняется',
+        statusIdle: 'Простаивает',
         collapseGroup: 'Свернуть группу',
         expandGroup: 'Развернуть группу',
     },

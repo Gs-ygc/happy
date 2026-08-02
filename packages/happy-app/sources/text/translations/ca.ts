@@ -1048,6 +1048,7 @@ export const ca: TranslationStructure = {
         statusThinking: 'Pensant',
         statusPermission: 'Permís requerit',
         statusRunning: 'En execució',
+        statusIdle: 'Inactiu',
         collapseGroup: 'Plega el grup',
         expandGroup: 'Desplega el grup',
     },

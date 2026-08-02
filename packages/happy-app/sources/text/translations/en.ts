@@ -1063,6 +1063,7 @@ export const en: TranslationStructure = {
         statusThinking: 'Thinking',
         statusPermission: 'Permission required',
         statusRunning: 'Running',
+        statusIdle: 'Idle',
         collapseGroup: 'Collapse group',
         expandGroup: 'Expand group',
     },

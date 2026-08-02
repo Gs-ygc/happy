@@ -1050,6 +1050,7 @@ export const ja: TranslationStructure = {
         statusThinking: '思考中',
         statusPermission: '権限が必要',
         statusRunning: '実行中',
+        statusIdle: '待機中',
         collapseGroup: 'グループを折りたたむ',
         expandGroup: 'グループを展開',
     },

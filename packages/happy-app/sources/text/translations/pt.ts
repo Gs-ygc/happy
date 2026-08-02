@@ -1047,6 +1047,7 @@ export const pt: TranslationStructure = {
         statusThinking: 'Pensando',
         statusPermission: 'Permissão necessária',
         statusRunning: 'Em execução',
+        statusIdle: 'Ocioso',
         collapseGroup: 'Recolher grupo',
         expandGroup: 'Expandir grupo',
     },

@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { Machine, Session } from '@/sync/storageTypes';
 import {
     OTHER_PROJECT_KEY,
+    TASK_IDLE_TIMEOUT_MS,
     buildTaskCenterData,
     filterCollapsedProjects,
     getTaskRunState,
+    isTaskActivelyWorking,
+    isTaskOnline,
     isTaskRunning,
 } from './taskCenterData';
 
@@ -60,17 +63,62 @@ function machineWith(overrides: Partial<Machine> = {}): Machine {
 
 const noMachines: Record<string, Machine> = {};
 
+describe('isTaskOnline', () => {
+    it('is online when active and the daemon is online', () => {
+        expect(isTaskOnline({ active: true, presence: 'online' })).toBe(true);
+    });
+
+    it('is not online when the daemon was last seen a while ago', () => {
+        expect(isTaskOnline({ active: true, presence: 123_456 })).toBe(false);
+    });
+
+    it('is not online when inactive even if presence says online', () => {
+        expect(isTaskOnline({ active: false, presence: 'online' })).toBe(false);
+    });
+});
+
+describe('isTaskActivelyWorking', () => {
+    const now = 10_000_000_000;
+
+    it('returns true while the agent is thinking', () => {
+        expect(isTaskActivelyWorking(sessionWith({ thinking: true }), now)).toBe(true);
+    });
+
+    it('returns true while the agent waits for a permission decision', () => {
+        const session = sessionWith({
+            agentState: { requests: { req1: { id: 'req1', tool: 'Bash' } } } as any,
+        });
+        expect(isTaskActivelyWorking(session, now)).toBe(true);
+    });
+
+    it('returns true when the session had real activity recently', () => {
+        expect(isTaskActivelyWorking(sessionWith({ updatedAt: now - 60_000 }), now)).toBe(true);
+    });
+
+    it('returns false when the session has been idle past the timeout', () => {
+        expect(isTaskActivelyWorking(
+            sessionWith({ updatedAt: now - TASK_IDLE_TIMEOUT_MS - 1000 }),
+            now,
+        )).toBe(false);
+    });
+});
+
 describe('isTaskRunning', () => {
-    it('is running when active and online', () => {
-        expect(isTaskRunning({ active: true, presence: 'online' })).toBe(true);
+    const now = 10_000_000_000;
+
+    it('is running when online and actively working', () => {
+        expect(isTaskRunning(sessionWith({ updatedAt: now - 5000 }), now)).toBe(true);
     });
 
-    it('is not running when active but the daemon is offline', () => {
-        expect(isTaskRunning({ active: true, presence: 123_456 })).toBe(false);
+    it('is not running when online but idle for a long time', () => {
+        expect(isTaskRunning(
+            sessionWith({ updatedAt: now - TASK_IDLE_TIMEOUT_MS - 5000 }),
+            now,
+        )).toBe(false);
     });
 
-    it('is not running when inactive even if presence says online', () => {
-        expect(isTaskRunning({ active: false, presence: 'online' })).toBe(false);
+    it('is not running when the daemon is offline', () => {
+        expect(isTaskRunning(sessionWith({ presence: 123_456, updatedAt: now - 5000 }), now)).toBe(false);
     });
 });
 
@@ -93,7 +141,7 @@ describe('getTaskRunState', () => {
 
 describe('buildTaskCenterData', () => {
     it('partitions running sessions into the running section and the rest into projects', () => {
-        const running = sessionWith({ id: 'run-1', updatedAt: 5000 });
+        const running = sessionWith({ id: 'run-1', updatedAt: Date.now() - 1000 });
         const inactive = sessionWith({ id: 'rest-1', active: false, presence: 99, updatedAt: 4000 });
         const data = buildTaskCenterData([inactive, running], noMachines, []);
 
@@ -104,10 +152,24 @@ describe('buildTaskCenterData', () => {
     });
 
     it('sorts the running section by most recent activity first', () => {
-        const older = sessionWith({ id: 'old', updatedAt: 1000 });
-        const newer = sessionWith({ id: 'new', updatedAt: 9000 });
+        const older = sessionWith({ id: 'old', updatedAt: Date.now() - 200_000 });
+        const newer = sessionWith({ id: 'new', updatedAt: Date.now() - 1000 });
         const data = buildTaskCenterData([older, newer], noMachines, []);
         expect(data.running.map((item) => item.sessionId)).toEqual(['new', 'old']);
+    });
+
+    it('keeps online-but-idle sessions out of running and marks them online', () => {
+        const idle = sessionWith({
+            id: 'idle-1',
+            updatedAt: Date.now() - TASK_IDLE_TIMEOUT_MS - 60_000,
+        });
+        const data = buildTaskCenterData([idle], noMachines, []);
+
+        expect(data.runningCount).toBe(0);
+        const item = data.projects[0].items[0];
+        expect(item.sessionId).toBe('idle-1');
+        expect(item.isOnline).toBe(true);
+        expect(item.isRunning).toBe(false);
     });
 
     it('groups remaining sessions by project path and sorts groups by path', () => {
@@ -147,7 +209,7 @@ describe('buildTaskCenterData', () => {
     });
 
     it('marks pinned sessions', () => {
-        const session = sessionWith({ id: 'pinned-1', updatedAt: 3000 });
+        const session = sessionWith({ id: 'pinned-1', updatedAt: Date.now() - 1000 });
         const data = buildTaskCenterData([session], noMachines, ['pinned-1']);
         expect(data.running[0].isPinned).toBe(true);
     });
@@ -155,7 +217,7 @@ describe('buildTaskCenterData', () => {
     it('attaches the visible agent goal for running sessions', () => {
         const session = sessionWith({
             id: 'goal-1',
-            updatedAt: 3000,
+            updatedAt: Date.now() - 1000,
             agentState: {
                 agentGoalStatus: {
                     status: 'active',

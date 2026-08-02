@@ -163,7 +163,9 @@ const TaskRow = React.memo(({ item, name, onPress }: {
                 <Text style={[styles.rowStatus, { color: status.color }]} numberOfLines={1}>
                     {item.isRunning
                         ? getStatusText(item.state) + (pathBasename ? ' · ' + pathBasename : '')
-                        : (pathBasename || t('status.offline'))}
+                        : item.isOnline
+                            ? (pathBasename ? pathBasename + ' · ' + t('taskCenter.statusIdle') : t('taskCenter.statusIdle'))
+                            : (pathBasename || t('status.offline'))}
                 </Text>
                 {item.goal ? (
                     <View style={styles.goalContainer}>

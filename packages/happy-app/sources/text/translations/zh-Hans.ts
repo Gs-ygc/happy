@@ -1049,6 +1049,7 @@ export const zhHans: TranslationStructure = {
         statusThinking: '思考中',
         statusPermission: '等待权限',
         statusRunning: '运行中',
+        statusIdle: '空闲中',
         collapseGroup: '折叠分组',
         expandGroup: '展开分组',
     },
