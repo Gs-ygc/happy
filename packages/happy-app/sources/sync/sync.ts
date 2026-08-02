@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import * as Application from 'expo-application';
 import { apiSocket, getCurrentAppState, getHappyClientId } from '@/sync/apiSocket';
 import { notifyUnreadMessage } from '@/sync/webTabTitle';
 import { AuthCredentials } from '@/auth/tokenStorage';
@@ -67,6 +68,7 @@ import { readFileBytes } from '@/utils/readFileBytes';
 import { Modal } from '@/modal';
 import { t } from '@/text';
 import { isRigMetadataV1, rigCanUseAttachments, usesControlledSessionUi } from './rig';
+import { fetchGitHubNativeUpdate } from '@/utils/githubNativeUpdate';
 
 type V3GetSessionMessagesResponse = {
     messages: ApiMessage[];
@@ -1716,6 +1718,27 @@ class Sync {
             }
             if (Platform.OS === 'android' && !Constants.expoConfig?.android?.package) {
                 return;
+            }
+
+            if (Platform.OS === 'android') {
+                const runtimeVersion = typeof Constants.expoConfig?.runtimeVersion === 'string'
+                    ? Constants.expoConfig.runtimeVersion
+                    : null;
+                const currentVersionCode = Number(
+                    Application.nativeBuildVersion ?? Constants.expoConfig?.android?.versionCode,
+                );
+
+                if (runtimeVersion && Number.isSafeInteger(currentVersionCode)) {
+                    try {
+                        const githubUpdate = await fetchGitHubNativeUpdate(runtimeVersion, currentVersionCode);
+                        storage.getState().applyNativeUpdateStatus(githubUpdate
+                            ? { available: true, updateUrl: githubUpdate.downloadUrl }
+                            : { available: false });
+                        return;
+                    } catch (error) {
+                        console.log('[fetchNativeUpdate] GitHub release check failed, falling back to server:', error);
+                    }
+                }
             }
 
             const serverUrl = getServerUrl();

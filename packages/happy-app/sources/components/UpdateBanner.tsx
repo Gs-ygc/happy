@@ -10,6 +10,9 @@ import { useRouter } from 'expo-router';
 import { Platform } from 'react-native';
 import { openExternalUrl } from '@/utils/openExternalUrl';
 import { t } from '@/text';
+import { installAndroidApkUpdate } from '@/utils/installAndroidUpdate';
+import { isTrustedAndroidApkUpdateUrl } from '@/utils/githubNativeUpdate';
+import { Modal } from '@/modal';
 
 export const UpdateBanner = React.memo(() => {
     const { theme } = useUnistyles();
@@ -17,19 +20,46 @@ export const UpdateBanner = React.memo(() => {
     const { hasUnread, markAsRead } = useChangelog();
     const updateUrl = useNativeUpdate();
     const router = useRouter();
+    const [isInstallingNativeUpdate, setIsInstallingNativeUpdate] = React.useState(false);
+
+    const handleNativeUpdate = React.useCallback(async () => {
+        if (!updateUrl || isInstallingNativeUpdate) {
+            return;
+        }
+
+        setIsInstallingNativeUpdate(true);
+        try {
+            if (Platform.OS === 'android' && isTrustedAndroidApkUpdateUrl(updateUrl)) {
+                await installAndroidApkUpdate(updateUrl);
+            } else {
+                await openExternalUrl(updateUrl);
+            }
+        } catch (error) {
+            console.error('Failed to install native update:', error);
+            Modal.alert(t('common.error'), t('errors.tryAgain'));
+        } finally {
+            setIsInstallingNativeUpdate(false);
+        }
+    }, [isInstallingNativeUpdate, updateUrl]);
 
     // Show native app update banner (highest priority)
     if (updateUrl) {
-        const handleOpenStore = () => openExternalUrl(updateUrl);
+        const isDirectAndroidUpdate = Platform.OS === 'android'
+            && isTrustedAndroidApkUpdateUrl(updateUrl);
 
         return (
             <ItemGroup>
                 <Item
                     title={t('updateBanner.nativeUpdateAvailable')}
-                    subtitle={Platform.OS === 'ios' ? t('updateBanner.tapToUpdateAppStore') : t('updateBanner.tapToUpdatePlayStore')}
+                    subtitle={Platform.OS === 'ios'
+                        ? t('updateBanner.tapToUpdateAppStore')
+                        : isDirectAndroidUpdate
+                            ? t('updateBanner.pressToApply')
+                            : t('updateBanner.tapToUpdatePlayStore')}
                     icon={<Ionicons name="download-outline" size={28} color={theme.colors.success} />}
-                    showChevron={true}
-                    onPress={handleOpenStore}
+                    showChevron={!isDirectAndroidUpdate}
+                    loading={isInstallingNativeUpdate}
+                    onPress={handleNativeUpdate}
                 />
             </ItemGroup>
         );

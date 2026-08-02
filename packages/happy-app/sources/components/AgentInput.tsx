@@ -1422,7 +1422,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                     style={[
                                         styles.sendButton,
                                         isSendBlocked ? styles.sendButtonLocked :
-                                        (hasText || props.isSending || (props.onMicPress && !props.isMicActive))
+                                        (hasText || props.isSending || props.onMicPress)
                                             ? styles.sendButtonActive
                                             : styles.sendButtonInactive
                                     ]}
@@ -1438,6 +1438,12 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                         hitSlop={{ top: 5, bottom: 10, left: 0, right: 0 }}
                                         onPress={handleSendPress}
                                         disabled={!canPressSendButton}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={hasText || hasImages
+                                            ? 'Send message'
+                                            : props.isMicActive
+                                                ? 'Stop voice assistant'
+                                                : 'Start voice assistant'}
                                     >
                                         {props.isSending ? (
                                             <ActivityIndicator
@@ -1460,7 +1466,13 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                                     { marginTop: Platform.OS === 'web' ? 2 : 0 }
                                                 ]}
                                             />
-                                        ) : props.onMicPress && !props.isMicActive ? (
+                                        ) : props.isMicActive ? (
+                                            <Octicons
+                                                name="stop"
+                                                size={16}
+                                                color={theme.colors.button.primary.tint}
+                                            />
+                                        ) : props.onMicPress ? (
                                             <Ionicons
                                                 name="mic-outline"
                                                 size={18}

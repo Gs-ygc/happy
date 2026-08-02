@@ -31,6 +31,7 @@ export async function startRealtimeSession(sessionId: string, initialContext?: s
 
     if (!voiceSession) {
         console.warn('No voice session registered');
+        Modal.alert(t('common.error'), t('errors.voiceServiceUnavailable'));
         return null;
     }
 
@@ -134,6 +135,7 @@ export async function startRealtimeSession(sessionId: string, initialContext?: s
             systemPrompt,
             firstMessage,
             conversationToken: response.conversationToken,
+            conversationId: response.conversationId,
             agentId: response.agentId,
             userId: response.elevenUserId,
         });

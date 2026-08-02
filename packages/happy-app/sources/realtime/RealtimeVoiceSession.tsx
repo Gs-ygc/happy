@@ -5,9 +5,13 @@ import { storage } from '@/sync/storage';
 import { realtimeClientTools } from './realtimeClientTools';
 import { getElevenLabsCodeFromPreference } from '@/constants/Languages';
 import type { VoiceSession, VoiceSessionConfig } from './types';
+import { VoiceConnectionWaiter } from './VoiceConnectionWaiter';
 
 // Static reference to the conversation hook instance
 let conversationInstance: ReturnType<typeof useConversation> | null = null;
+
+const VOICE_CONNECTION_TIMEOUT_MS = 15_000;
+const voiceConnectionWaiter = new VoiceConnectionWaiter();
 
 // VAD state for user speech detection
 const VAD_THRESHOLD = 0.5;
@@ -54,8 +58,21 @@ class RealtimeVoiceSessionImpl implements VoiceSession {
                 },
             };
             
-            await conversationInstance.startSession(sessionConfig);
-            return conversationInstance.getId?.() ?? null;
+            const connection = voiceConnectionWaiter.wait(
+                config.conversationId ?? null,
+                VOICE_CONNECTION_TIMEOUT_MS,
+                () => {
+                    conversationInstance?.endSession();
+                },
+            );
+
+            try {
+                conversationInstance.startSession(sessionConfig);
+            } catch (error) {
+                voiceConnectionWaiter.reject(error instanceof Error ? error : new Error(String(error)));
+            }
+
+            return await connection;
         } catch (error) {
             console.error('Failed to start realtime session:', error);
             storage.getState().setRealtimeStatus('error');
@@ -70,7 +87,7 @@ class RealtimeVoiceSessionImpl implements VoiceSession {
         }
 
         try {
-            await conversationInstance.endSession();
+            conversationInstance.endSession();
         } catch (error) {
             console.error('Failed to end realtime session:', error);
         } finally {
@@ -112,9 +129,16 @@ export const RealtimeVoiceSession: React.FC = () => {
             console.log('Realtime session connected:', data);
             storage.getState().setRealtimeStatus('connected');
             storage.getState().setRealtimeMode('idle');
+            voiceConnectionWaiter.resolve(data.conversationId);
         },
-        onDisconnect: () => {
-            console.log('Realtime session disconnected');
+        onDisconnect: (details) => {
+            console.log('Realtime session disconnected:', details);
+            if (voiceConnectionWaiter.isPending) {
+                const message = details.reason === 'error'
+                    ? details.message
+                    : 'Voice session disconnected before it connected';
+                voiceConnectionWaiter.reject(new Error(message));
+            }
             // Bump generation only when an active session ends — skipping the
             // initial 'disconnected' state avoids remounting on cold launch
             // (which previously caused a phantom keyboard).
@@ -129,10 +153,11 @@ export const RealtimeVoiceSession: React.FC = () => {
         onMessage: (data) => {
             console.log('Realtime message:', data);
         },
-        onError: (error) => {
+        onError: (message, context) => {
             // Log but don't block app - voice features will be unavailable
             // This prevents initialization errors from showing "Terminals error" on startup
-            console.warn('Realtime voice not available:', error);
+            console.warn('Realtime voice not available:', message, context);
+            voiceConnectionWaiter.reject(new Error(message || 'Voice session failed'));
             // Don't set error status during initialization - just set disconnected
             // This allows the app to continue working without voice features.
             // Don't bump generation here — onError can fire on transient/recoverable
@@ -187,9 +212,13 @@ export const RealtimeVoiceSession: React.FC = () => {
     const hasRegistered = useRef(false);
 
     useEffect(() => {
-        // Store the conversation instance globally
+        // The convenience hook returns a new composite object as status/mode
+        // changes. Keep the bridge current without treating those updates as
+        // provider teardown.
         conversationInstance = conversation;
+    }, [conversation]);
 
+    useEffect(() => {
         // Register the voice session once
         if (!hasRegistered.current) {
             try {
@@ -201,10 +230,10 @@ export const RealtimeVoiceSession: React.FC = () => {
         }
 
         return () => {
-            // Clean up on unmount
             conversationInstance = null;
+            voiceConnectionWaiter.reject(new Error('Voice session provider was reset'));
         };
-    }, [conversation]);
+    }, []);
 
     // This component doesn't render anything visible
     return null;

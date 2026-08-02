@@ -4,6 +4,7 @@ export interface VoiceSessionConfig {
     systemPrompt?: string;
     firstMessage?: string;
     conversationToken?: string;
+    conversationId?: string;
     agentId?: string;
     userId?: string;
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ElevenLabsProvider } from '@elevenlabs/react-native';
+import { ConversationProvider } from '@elevenlabs/react-native';
 import { RealtimeVoiceSession } from './RealtimeVoiceSession';
 import { useVoiceSessionGeneration } from '@/sync/storage';
 
@@ -11,9 +11,9 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
     const generation = useVoiceSessionGeneration();
     return (
         <>
-            <ElevenLabsProvider key={generation}>
+            <ConversationProvider key={generation}>
                 <RealtimeVoiceSession />
-            </ElevenLabsProvider>
+            </ConversationProvider>
             {children}
         </>
     );
