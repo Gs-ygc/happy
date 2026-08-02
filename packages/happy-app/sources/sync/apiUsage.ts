@@ -58,6 +58,12 @@ export type Sub2ApiAccount = {
     quota_monthly_used?: number | null;
     quota_monthly_limit?: number | null;
     session_window_status?: string;
+    usage?: {
+        requests: number;
+        totalTokens: number;
+        cost: number;
+        actualCost: number;
+    };
 };
 
 export type Sub2ApiUsage = {
@@ -172,6 +178,11 @@ function getPeriodDays(period: Sub2ApiPeriod): number | 'all' {
     return 'all';
 }
 
+function getAccountStatsDays(period: Sub2ApiPeriod): number {
+    const days = getPeriodDays(period);
+    return days === 'all' ? 36500 : days;
+}
+
 function summarizeTrend(trend: Sub2ApiDailyUsage[]): Sub2ApiUsage['today'] {
     return trend.reduce((total, day) => ({
         requests: total.requests + day.requests,
@@ -210,6 +221,7 @@ function sanitizeAccount(account: Sub2ApiAccount): Sub2ApiAccount {
         quota_monthly_used: account.quota_monthly_used,
         quota_monthly_limit: account.quota_monthly_limit,
         session_window_status: account.session_window_status,
+        usage: account.usage ? { ...account.usage } : undefined,
     };
 }
 
@@ -295,12 +307,40 @@ export async function fetchSub2ApiUsage(config: Sub2ApiConfig, period: Sub2ApiPe
     ]);
 
     const trendRows = trend?.trend || [];
+    const accountItems = accounts?.items || [];
+    const accountStats = await Promise.all(accountItems.map(async (account) => {
+        try {
+            const stats = await requestJson<{
+                summary?: {
+                    total_requests?: number;
+                    total_tokens?: number;
+                    total_cost?: number;
+                    total_user_cost?: number;
+                };
+            }>(`${baseUrl}/api/v1/admin/accounts/${account.id}/stats?days=${getAccountStatsDays(period)}`, { headers });
+            const summary = stats?.summary || {};
+            const cost = summary.total_cost || summary.total_user_cost || 0;
+            return [account.id, {
+                requests: summary.total_requests || 0,
+                totalTokens: summary.total_tokens || 0,
+                cost,
+                actualCost: cost,
+            }] as const;
+        } catch {
+            return [account.id, null] as const;
+        }
+    }));
+    const accountStatsById = new Map(accountStats);
+    const accountsWithUsage = accountItems.map((account) => {
+        const usage = accountStatsById.get(account.id);
+        return usage ? { ...account, usage } : account;
+    });
     const normalized = normalizeSub2ApiUsage({
         user,
         stats,
         models: models?.models || [],
         trend: trendRows,
-        accounts: accounts?.items || [],
+        accounts: accountsWithUsage,
     });
     if (period !== 'today') {
         normalized.today = summarizeTrend(trendRows);

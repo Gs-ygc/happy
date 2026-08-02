@@ -53,6 +53,7 @@ const sub2ApiText = {
     accountActive: '可用',
     accountPaused: '已暂停',
     accountUnavailable: '不可用',
+    accountUsage: '周期用量',
 };
 
 const styles = StyleSheet.create((theme) => ({
@@ -254,6 +255,9 @@ export const UsagePanel: React.FC = () => {
                     <Text style={styles.modelMeta}>
                         {sub2ApiText.monthly} {formatQuota(account.quota_monthly_used, account.quota_monthly_limit)} · {account.rate_multiplier ?? 1}x · {account.concurrency ?? 0} 并发
                     </Text>
+                    {account.usage ? <Text style={styles.modelMeta}>
+                        {sub2ApiText.accountUsage}: {formatMoney(account.usage.actualCost)} · {formatNumber(account.usage.requests)} {sub2ApiText.requests} · {formatNumber(account.usage.totalTokens)} {t('usage.tokens').toLowerCase()}
+                    </Text> : null}
                 </View>
             )) : <Text style={styles.empty}>{t('usage.noData')}</Text>}
         </ItemGroup>
