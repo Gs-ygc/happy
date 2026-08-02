@@ -33,6 +33,7 @@ export const en: TranslationStructure = {
     tabs: {
         // Tab navigation labels
         inbox: 'Inbox',
+        tasks: 'Tasks',
         sessions: 'Terminals',
         settings: 'Settings',
     },
@@ -1052,6 +1053,19 @@ export const en: TranslationStructure = {
         friendAcceptedGeneric: 'Friend request accepted',
     },
 
+    taskCenter: {
+        running: 'Running',
+        all: 'All',
+        noRunning: 'No running tasks',
+        noTasks: 'No tasks yet',
+        noTasksDescription: 'Start a session from the Terminals tab — it will show up here.',
+        otherProjects: 'Other',
+        statusThinking: 'Thinking',
+        statusPermission: 'Permission required',
+        statusRunning: 'Running',
+        collapseGroup: 'Collapse group',
+        expandGroup: 'Expand group',
+    },
 } as const;
 
 export type TranslationsEn = typeof en;

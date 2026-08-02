@@ -1,3 +1,12 @@
+# Aug 2 — Task Center
+
+The Inbox tab is now a Task Center for managing your coding sessions.
+
+- New Tasks tab replaces Inbox: running sessions with live status (thinking / permission / running) and goal progress at the top.
+- All other sessions are grouped by project path, with collapsible groups that remember their state.
+- Tap a task to open it; pin or archive from the row; long-press for the full action menu.
+- Friends/inbox entry removed from the tab bar.
+
 # July 11 — GPT-5.6, Antigravity, bugfixes
 
 New models, a new agent, and live subagent rendering.

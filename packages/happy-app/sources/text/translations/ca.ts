@@ -18,6 +18,7 @@ export const ca: TranslationStructure = {
     tabs: {
         // Tab navigation labels
         inbox: 'Safata',
+        tasks: 'Tasques',
         sessions: 'Terminals',
         settings: 'Configuració',
     },
@@ -1035,7 +1036,21 @@ export const ca: TranslationStructure = {
         friendRequestGeneric: 'Nova sol·licitud d\'amistat',
         friendAccepted: ({ name }: { name: string }) => `Ara ets amic de ${name}`,
         friendAcceptedGeneric: 'Sol·licitud d\'amistat acceptada',
-    }
+    },
+
+    taskCenter: {
+        running: 'En execució',
+        all: 'Totes',
+        noRunning: 'Cap tasca en execució',
+        noTasks: 'Encara no hi ha tasques',
+        noTasksDescription: 'Inicia una sessió des de la pestanya Terminals per crear una tasca.',
+        otherProjects: 'Altres',
+        statusThinking: 'Pensant',
+        statusPermission: 'Permís requerit',
+        statusRunning: 'En execució',
+        collapseGroup: 'Plega el grup',
+        expandGroup: 'Desplega el grup',
+    },
 } as const;
 
 export type TranslationsCa = typeof ca;

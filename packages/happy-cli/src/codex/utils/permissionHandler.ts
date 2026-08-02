@@ -17,10 +17,17 @@ import {
 // Re-export types for backwards compatibility
 export type { PermissionResult, PendingRequest };
 
+export type CodexPermissionRequestInfo = {
+    toolCallId: string;
+    toolName: string;
+    input: unknown;
+};
+
 /**
  * Codex-specific permission handler.
  */
 export class CodexPermissionHandler extends BasePermissionHandler {
+    private readonly onPermissionRequest?: (info: CodexPermissionRequestInfo) => void;
     // Exact tool names that should always be auto-approved. Include the bare
     // form (used by Codex elicitation messages like `tool "change_title"`)
     // and the MCP-qualified form for defense in depth.
@@ -37,8 +44,9 @@ export class CodexPermissionHandler extends BasePermissionHandler {
         'change_title',
     ];
 
-    constructor(session: ApiSessionClient) {
+    constructor(session: ApiSessionClient, onPermissionRequest?: (info: CodexPermissionRequestInfo) => void) {
         super(session);
+        this.onPermissionRequest = onPermissionRequest;
     }
 
     protected getLogPrefix(): string {
@@ -109,6 +117,10 @@ export class CodexPermissionHandler extends BasePermissionHandler {
 
             // Update agent state with pending request
             this.addPendingRequestToState(toolCallId, toolName, input);
+
+            // Notify the user that a tool needs approval. Without this a
+            // permission request sits silently until the app is opened.
+            this.onPermissionRequest?.({ toolCallId, toolName, input });
 
             logger.debug(`${this.getLogPrefix()} Permission request sent for tool: ${toolName} (${toolCallId})`);
         });

@@ -18,6 +18,7 @@ export const en = {
     tabs: {
         // Tab navigation labels
         inbox: 'Inbox',
+        tasks: 'Tasks',
         sessions: 'Terminals',
         settings: 'Settings',
     },
@@ -27,6 +28,21 @@ export const en = {
         emptyTitle: 'Empty Inbox',
         emptyDescription: 'Connect with friends to start sharing sessions',
         updates: 'Updates',
+    },
+
+    taskCenter: {
+        // Task Center tab
+        running: 'Running',
+        all: 'All',
+        noRunning: 'No running tasks',
+        noTasks: 'No tasks yet',
+        noTasksDescription: 'Start a session from the Terminals tab — it will show up here.',
+        otherProjects: 'Other',
+        statusThinking: 'Thinking',
+        statusPermission: 'Permission required',
+        statusRunning: 'Running',
+        collapseGroup: 'Collapse group',
+        expandGroup: 'Expand group',
     },
 
     common: {

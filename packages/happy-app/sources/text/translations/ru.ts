@@ -29,6 +29,7 @@ export const ru: TranslationStructure = {
     tabs: {
         // Tab navigation labels
         inbox: 'Входящие',
+        tasks: 'Задачи',
         sessions: 'Терминалы',
         settings: 'Настройки',
     },
@@ -1066,6 +1067,19 @@ export const ru: TranslationStructure = {
         friendAcceptedGeneric: 'Запрос в друзья принят',
     },
 
+    taskCenter: {
+        running: 'Запущенные',
+        all: 'Все',
+        noRunning: 'Нет запущенных задач',
+        noTasks: 'Задач пока нет',
+        noTasksDescription: 'Запустите сеанс на вкладке «Терминалы», чтобы создать задачу.',
+        otherProjects: 'Прочее',
+        statusThinking: 'Думает',
+        statusPermission: 'Требуется разрешение',
+        statusRunning: 'Выполняется',
+        collapseGroup: 'Свернуть группу',
+        expandGroup: 'Развернуть группу',
+    },
 } as const;
 
 export type TranslationsRu = typeof ru;

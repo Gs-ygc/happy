@@ -20,6 +20,7 @@ export const zhHant: TranslationStructure = {
     tabs: {
         // Tab navigation labels
         inbox: '收件匣',
+        tasks: '任務',
         sessions: '終端',
         settings: '設定',
     },
@@ -1035,5 +1036,19 @@ export const zhHant: TranslationStructure = {
         friendRequestGeneric: '新的好友請求',
         friendAccepted: ({ name }: { name: string }) => `您現在與 ${name} 成為了好友`,
         friendAcceptedGeneric: '好友請求已接受',
+    },
+
+    taskCenter: {
+        running: '執行中',
+        all: '全部',
+        noRunning: '沒有執行中的任務',
+        noTasks: '還沒有任務',
+        noTasksDescription: '在「終端」頁新增工作階段即可建立任務。',
+        otherProjects: '其他',
+        statusThinking: '思考中',
+        statusPermission: '等待權限',
+        statusRunning: '執行中',
+        collapseGroup: '摺疊群組',
+        expandGroup: '展開群組',
     },
 } as const;

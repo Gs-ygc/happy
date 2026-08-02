@@ -18,6 +18,7 @@ export const es: TranslationStructure = {
     tabs: {
         // Tab navigation labels
         inbox: 'Bandeja',
+        tasks: 'Tareas',
         sessions: 'Terminales',
         settings: 'Configuración',
     },
@@ -1038,6 +1039,19 @@ export const es: TranslationStructure = {
         friendAcceptedGeneric: 'Solicitud de amistad aceptada',
     },
 
+    taskCenter: {
+        running: 'En ejecución',
+        all: 'Todas',
+        noRunning: 'Sin tareas en ejecución',
+        noTasks: 'Aún no hay tareas',
+        noTasksDescription: 'Inicia una sesión desde la pestaña Terminales para crear una tarea.',
+        otherProjects: 'Otros',
+        statusThinking: 'Pensando',
+        statusPermission: 'Permiso requerido',
+        statusRunning: 'En ejecución',
+        collapseGroup: 'Contraer grupo',
+        expandGroup: 'Expandir grupo',
+    },
 } as const;
 
 export type TranslationsEs = typeof es;

@@ -19,6 +19,7 @@ export const LocalSettingsSchema = z.object({
     pinnedSessionIds: z.array(z.string()).describe("Session IDs that are pinned to the top of the sessions list"),
     pinnedMachineIds: z.array(z.string()).describe("Machine IDs that are pinned to the top of the machine list"),
     collapsedSessionMachineIds: z.array(z.string()).describe("Machine groups collapsed in the sessions list"),
+    collapsedTaskProjectKeys: z.array(z.string()).describe("Task center project groups collapsed by the user"),
     // CLI version acknowledgments - keyed by machineId
     acknowledgedCliVersions: z.record(z.string(), z.string()).describe('Acknowledged CLI versions per machine'),
 });
@@ -50,6 +51,7 @@ export const localSettingsDefaults: LocalSettings = {
     pinnedSessionIds: [],
     pinnedMachineIds: [],
     collapsedSessionMachineIds: [],
+    collapsedTaskProjectKeys: [],
     acknowledgedCliVersions: {},
 };
 Object.freeze(localSettingsDefaults);

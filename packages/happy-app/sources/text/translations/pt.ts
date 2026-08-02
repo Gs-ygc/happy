@@ -18,6 +18,7 @@ export const pt: TranslationStructure = {
     tabs: {
         // Tab navigation labels
         inbox: 'Caixa de entrada',
+        tasks: 'Tarefas',
         sessions: 'Terminais',
         settings: 'Configurações',
     },
@@ -1034,7 +1035,21 @@ export const pt: TranslationStructure = {
         friendRequestGeneric: 'Novo pedido de amizade',
         friendAccepted: ({ name }: { name: string }) => `Agora você é amigo de ${name}`,
         friendAcceptedGeneric: 'Pedido de amizade aceito',
-    }
+    },
+
+    taskCenter: {
+        running: 'Em execução',
+        all: 'Todas',
+        noRunning: 'Nenhuma tarefa em execução',
+        noTasks: 'Nenhuma tarefa ainda',
+        noTasksDescription: 'Inicie uma sessão na aba Terminais para criar uma tarefa.',
+        otherProjects: 'Outros',
+        statusThinking: 'Pensando',
+        statusPermission: 'Permissão necessária',
+        statusRunning: 'Em execução',
+        collapseGroup: 'Recolher grupo',
+        expandGroup: 'Expandir grupo',
+    },
 } as const;
 
 export type TranslationsPt = typeof pt;

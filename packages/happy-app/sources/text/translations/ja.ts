@@ -21,6 +21,7 @@ export const ja: TranslationStructure = {
     tabs: {
         // Tab navigation labels
         inbox: '受信トレイ',
+        tasks: 'タスク',
         sessions: 'ターミナル',
         settings: '設定',
     },
@@ -1037,5 +1038,19 @@ export const ja: TranslationStructure = {
         friendRequestGeneric: '新しい友達リクエスト',
         friendAccepted: ({ name }: { name: string }) => `${name}さんと友達になりました`,
         friendAcceptedGeneric: '友達リクエストが承認されました',
-    }
+    },
+
+    taskCenter: {
+        running: '実行中',
+        all: 'すべて',
+        noRunning: '実行中のタスクはありません',
+        noTasks: 'タスクはまだありません',
+        noTasksDescription: '「ターミナル」タブからセッションを開始するとタスクが作成されます。',
+        otherProjects: 'その他',
+        statusThinking: '思考中',
+        statusPermission: '権限が必要',
+        statusRunning: '実行中',
+        collapseGroup: 'グループを折りたたむ',
+        expandGroup: 'グループを展開',
+    },
 } as const;

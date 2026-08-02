@@ -39,6 +39,7 @@ import { resumeExistingThread } from './resumeExistingThread';
 import { restartCodexBackend, type RestartCodexBackendResult } from './restartCodexBackend';
 import { emitReadyIfIdle } from './emitReadyIfIdle';
 import { enqueueCodexUserText, isCodexClearText } from './codexClearCommand';
+import { interruptTurnForIncomingMessage } from './codexTurnInterrupt';
 import { downloadCodexFileEventAttachment } from './utils/attachmentEvents';
 import { prepareCodexImageInputItems } from './utils/imageInput';
 import { createSerialAsyncHandler } from './utils/serialAsyncHandler';
@@ -396,6 +397,11 @@ export async function runCodex(opts: {
             appendSystemPrompt: messageAppendSystemPrompt,
             effort: messageEffort,
         };
+        // Match Codex CLI semantics: a message sent while the agent is
+        // working interrupts the running turn so it is processed immediately
+        // instead of waiting until the current turn completes.
+        interruptTurnForIncomingMessage(client, permissionHandler, (message) => logger.debug(message));
+
         const enqueueResult = enqueueCodexUserText({
             text: message.content.text,
             mode: enhancedMode,
@@ -671,7 +677,23 @@ export async function runCodex(opts: {
 
     client = new CodexAppServerClient(sandboxConfig);
 
-    permissionHandler = new CodexPermissionHandler(session);
+    permissionHandler = new CodexPermissionHandler(session, ({ toolCallId, toolName }) => {
+        try {
+            api.push().sendSessionNotification({
+                kind: 'permission',
+                metadata: session.getMetadata(),
+                data: {
+                    sessionId: session.sessionId,
+                    requestId: toolCallId,
+                    tool: toolName,
+                    type: 'permission_request',
+                    provider: 'codex',
+                },
+            });
+        } catch (pushError) {
+            logger.debug('[Codex] Failed to send permission push', pushError);
+        }
+    });
     // Drop any permission requests left in agent state from a previous CLI
     // process that died while a tool prompt was open — see the matching
     // call in claudeRemoteLauncher for the full rationale.

@@ -6,6 +6,7 @@ import * as Fonts from 'expo-font';
 import * as Notifications from 'expo-notifications';
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useRootNavigationState } from 'expo-router';
 import { AuthCredentials, TokenStorage } from '@/auth/tokenStorage';
 import { AuthProvider } from '@/auth/AuthContext';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
@@ -276,6 +277,35 @@ export default function RootLayout() {
     }, [initState]);
 
     const handledNotificationIds = React.useRef<Set<string>>(new Set());
+    // Route from a notification tap that arrived before the root navigator
+    // mounted (cold start). expo-router drops router.push() issued before the
+    // navigator is ready, and clearing the last notification response would
+    // lose the tap — so we stash the route and navigate once ready.
+    const pendingNotificationRoute = React.useRef<`/session/${string}` | null>(null);
+    const rootNavigationState = useRootNavigationState();
+    const navigationReady = rootNavigationState?.key != null;
+
+    const navigateToSessionFromRoute = React.useCallback((route: `/session/${string}`) => {
+        const encodedSessionId = route.replace(/^\/session\//, '');
+        const sessionId = (() => {
+            try {
+                return decodeURIComponent(encodedSessionId);
+            } catch {
+                return encodedSessionId;
+            }
+        })();
+        console.log(`[PUSH ROUTING] Navigating to session: ${sessionId}`);
+        navigateToSession(router, sessionId);
+    }, [router]);
+
+    const clearPendingNotificationResponse = React.useCallback(async () => {
+        try {
+            await Notifications.clearLastNotificationResponseAsync();
+        } catch (error) {
+            console.log('Failed to clear last notification response:', error);
+        }
+    }, []);
+
     const handleNotificationResponse = React.useCallback(async (response: Notifications.NotificationResponse | null) => {
         if (!response) {
             console.log('[PUSH ROUTING] Notification response is null');
@@ -292,41 +322,43 @@ export default function RootLayout() {
 
         handledNotificationIds.current.add(responseId);
 
-        try {
-            if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
-                console.log(`[PUSH ROUTING] Ignoring non-default action: ${response.actionIdentifier}`);
-                return;
-            }
-
-            console.log(
-                '[PUSH ROUTING] notification.request.content.data:\n' +
-                stringifyNotificationPayload(response.notification.request.content.data)
-            );
-            const route = getSessionRouteFromNotificationResponse(response);
-            console.log(`[PUSH ROUTING] Computed route: ${route ?? 'null'}`);
-            if (!route) {
-                console.log('[PUSH ROUTING] No session route found in notification.request.content.data');
-                return;
-            }
-
-            const encodedSessionId = route.replace(/^\/session\//, '');
-            const sessionId = (() => {
-                try {
-                    return decodeURIComponent(encodedSessionId);
-                } catch {
-                    return encodedSessionId;
-                }
-            })();
-            console.log(`[PUSH ROUTING] Navigating to session: ${sessionId}`);
-            navigateToSession(router, sessionId);
-        } finally {
-            try {
-                await Notifications.clearLastNotificationResponseAsync();
-            } catch (error) {
-                console.log('Failed to clear last notification response:', error);
-            }
+        if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
+            console.log(`[PUSH ROUTING] Ignoring non-default action: ${response.actionIdentifier}`);
+            return;
         }
-    }, [router]);
+
+        console.log(
+            '[PUSH ROUTING] notification.request.content.data:\n' +
+            stringifyNotificationPayload(response.notification.request.content.data)
+        );
+        const route = getSessionRouteFromNotificationResponse(response);
+        console.log(`[PUSH ROUTING] Computed route: ${route ?? 'null'}`);
+        if (!route) {
+            console.log('[PUSH ROUTING] No session route found in notification.request.content.data');
+            return;
+        }
+
+        pendingNotificationRoute.current = route;
+        if (navigationReady) {
+            navigateToSessionFromRoute(route);
+            await clearPendingNotificationResponse();
+        }
+        // When !navigationReady the retry effect below navigates and clears.
+    }, [clearPendingNotificationResponse, navigateToSessionFromRoute, navigationReady]);
+
+    // Cold-start retry: navigate as soon as the root navigator is mounted.
+    React.useEffect(() => {
+        if (!navigationReady) {
+            return;
+        }
+        const route = pendingNotificationRoute.current;
+        if (!route) {
+            return;
+        }
+        pendingNotificationRoute.current = null;
+        navigateToSessionFromRoute(route);
+        void clearPendingNotificationResponse();
+    }, [clearPendingNotificationResponse, navigateToSessionFromRoute, navigationReady]);
 
     React.useEffect(() => {
         if (!initState) {

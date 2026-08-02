@@ -29,6 +29,7 @@ export const pl: TranslationStructure = {
     tabs: {
         // Tab navigation labels
         inbox: 'Skrzynka',
+        tasks: 'Zadania',
         sessions: 'Terminale',
         settings: 'Ustawienia',
     },
@@ -1067,6 +1068,19 @@ export const pl: TranslationStructure = {
         friendAcceptedGeneric: 'Zaproszenie do znajomych zaakceptowane',
     },
 
+    taskCenter: {
+        running: 'W trakcie',
+        all: 'Wszystkie',
+        noRunning: 'Brak zadań w trakcie',
+        noTasks: 'Brak zadań',
+        noTasksDescription: 'Uruchom sesję z zakładki Terminale, aby utworzyć zadanie.',
+        otherProjects: 'Inne',
+        statusThinking: 'Myśli',
+        statusPermission: 'Wymagana zgoda',
+        statusRunning: 'W trakcie',
+        collapseGroup: 'Zwiń grupę',
+        expandGroup: 'Rozwiń grupę',
+    },
 } as const;
 
 export type TranslationsPl = typeof pl;

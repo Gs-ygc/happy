@@ -20,6 +20,7 @@ export const zhHans: TranslationStructure = {
     tabs: {
         // Tab navigation labels
         inbox: '收件箱',
+        tasks: '任务',
         sessions: '终端',
         settings: '设置',
     },
@@ -1036,5 +1037,19 @@ export const zhHans: TranslationStructure = {
         friendRequestGeneric: '新的好友请求',
         friendAccepted: ({ name }: { name: string }) => `您现在与 ${name} 成为了好友`,
         friendAcceptedGeneric: '好友请求已接受',
-    }
+    },
+
+    taskCenter: {
+        running: '运行中',
+        all: '全部',
+        noRunning: '没有运行中的任务',
+        noTasks: '还没有任务',
+        noTasksDescription: '在「终端」页新建会话即可创建任务。',
+        otherProjects: '其他',
+        statusThinking: '思考中',
+        statusPermission: '等待权限',
+        statusRunning: '运行中',
+        collapseGroup: '折叠分组',
+        expandGroup: '展开分组',
+    },
 } as const;
