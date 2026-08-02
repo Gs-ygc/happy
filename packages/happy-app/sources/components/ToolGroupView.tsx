@@ -287,6 +287,8 @@ function ToolGroupMessageRow(props: {
     const hasResult = props.message.tool.state === "completed" && props.message.tool.result != null;
     const shouldRenderFullTool = hasResult || props.message.tool.permission?.status === 'pending'
         || props.message.tool.name === 'AskUserQuestion'
+        || props.message.tool.name === 'CodexPatch'
+        || props.message.tool.name === 'CodexDiff'
         || isTerminalToolName(props.message.tool.name);
     if (shouldRenderFullTool) {
         return (
