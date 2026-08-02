@@ -202,7 +202,11 @@ function BottomSheet({
             animationType="none"
             onRequestClose={onClose}
         >
-            <View style={sheetStyles.overlay}>
+            <KeyboardAvoidingView
+                behavior="height"
+                keyboardVerticalOffset={0}
+                style={sheetStyles.overlay}
+            >
                 <TouchableWithoutFeedback onPress={onClose}>
                     <Animated.View style={[sheetStyles.backdrop, { opacity: fadeAnim }]} />
                 </TouchableWithoutFeedback>
@@ -221,7 +225,7 @@ function BottomSheet({
                     </View>
                     {children}
                 </Animated.View>
-            </View>
+            </KeyboardAvoidingView>
         </RNModal>
     );
 }
