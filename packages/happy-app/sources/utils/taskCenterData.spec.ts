@@ -7,6 +7,7 @@ import {
     filterCollapsedProjects,
     getTaskRunState,
     isTaskActivelyWorking,
+    isTaskActive,
     isTaskOnline,
     isTaskRunning,
 } from './taskCenterData';
@@ -122,6 +123,20 @@ describe('isTaskRunning', () => {
     });
 });
 
+describe('isTaskActive', () => {
+    const now = 10_000_000_000;
+
+    it('counts unread agent output as active even when idle past the timeout', () => {
+        const session = sessionWith({ updatedAt: now - TASK_IDLE_TIMEOUT_MS - 60_000 });
+        expect(isTaskActive(session, new Set([session.id]), now)).toBe(true);
+    });
+
+    it('is not active when idle past the timeout and no unread', () => {
+        const session = sessionWith({ updatedAt: now - TASK_IDLE_TIMEOUT_MS - 60_000 });
+        expect(isTaskActive(session, new Set(), now)).toBe(false);
+    });
+});
+
 describe('getTaskRunState', () => {
     it('returns permission_required when the agent is waiting for permission', () => {
         const session = sessionWith({
@@ -170,6 +185,42 @@ describe('buildTaskCenterData', () => {
         expect(item.sessionId).toBe('idle-1');
         expect(item.isOnline).toBe(true);
         expect(item.isRunning).toBe(false);
+    });
+
+    it('pins sessions with unsubmitted input at the bottom pending section', () => {
+        const drafted = sessionWith({
+            id: 'draft-1',
+            draft: '  hello, agent!  ',
+            updatedAt: Date.now() - 1000,
+        });
+        const running = sessionWith({ id: 'run-1', updatedAt: Date.now() - 2000 });
+        const data = buildTaskCenterData([running, drafted], noMachines, []);
+
+        expect(data.runningCount).toBe(1);
+        expect(data.pendingCount).toBe(1);
+        expect(data.pending[0].sessionId).toBe('draft-1');
+        expect(data.pending[0].draft).toBe('  hello, agent!  ');
+        expect(data.pending[0].hasPendingInput).toBe(true);
+    });
+
+    it('sorts sessions with an in-progress goal to the top of running', () => {
+        const goal = sessionWith({
+            id: 'goal-1',
+            updatedAt: Date.now() - 5000,
+            agentState: {
+                agentGoalStatus: {
+                    status: 'active',
+                    source: 'claude',
+                    text: 'finish the feature',
+                    observedAt: Date.now(),
+                    sourceSessionId: 'claude-session-1',
+                },
+            } as any,
+        });
+        const recent = sessionWith({ id: 'recent-1', updatedAt: Date.now() - 1000 });
+        const data = buildTaskCenterData([recent, goal], noMachines, []);
+
+        expect(data.running.map((item) => item.sessionId)).toEqual(['goal-1', 'recent-1']);
     });
 
     it('groups remaining sessions by project path and sorts groups by path', () => {

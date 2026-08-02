@@ -28,6 +28,12 @@ export interface TaskItem {
     isOnline: boolean;
     /** True when the task belongs in the Running section (online + active work). */
     isRunning: boolean;
+    /** True when the session has unread agent output (needs attention). */
+    hasUnread: boolean;
+    /** Local draft text (typed but not submitted yet), if any. */
+    draft: string | null;
+    /** True when the user typed input that hasn't been submitted. */
+    hasPendingInput: boolean;
 }
 
 export interface TaskProjectGroup {
@@ -41,8 +47,11 @@ export interface TaskProjectGroup {
 
 export interface TaskCenterData {
     running: TaskItem[];
+    /** Sessions with unsubmitted user input; pinned at the very bottom. */
+    pending: TaskItem[];
     projects: TaskProjectGroup[];
     runningCount: number;
+    pendingCount: number;
     totalCount: number;
 }
 
@@ -54,7 +63,7 @@ export const OTHER_PROJECT_KEY = '__other__';
  * The CLI heartbeats every 2 seconds regardless of activity, so aliveness
  * alone does not mean the agent is actually doing something.
  */
-export const TASK_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+export const TASK_IDLE_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
 /**
  * A session is "online" when it is active AND the daemon reports it online.
@@ -88,6 +97,25 @@ export function isTaskRunning(session: Session, now: number = Date.now()): boole
 }
 
 /**
+ * Membership in the Running section: the session must be online AND either
+ * actively working or carrying unread agent output. Sessions that had no
+ * input/output for the idle window and no unread messages are not "active".
+ */
+export function isTaskActive(
+    session: Session,
+    unreadSessionIds: ReadonlySet<string>,
+    now: number = Date.now(),
+): boolean {
+    return isTaskOnline(session)
+        && (isTaskActivelyWorking(session, now) || unreadSessionIds.has(session.id));
+}
+
+/** True when the user typed input for this session that hasn't been submitted. */
+export function hasPendingUserInput(session: Pick<Session, 'draft'>): boolean {
+    return !!session.draft && session.draft.trim().length > 0;
+}
+
+/**
  * Sub-state shown in the running section:
  * - permission_required: agent is waiting for a tool permission decision
  * - thinking: agent is actively working
@@ -109,10 +137,11 @@ export function buildTaskItem(
     session: Session,
     machines: Record<string, Machine>,
     pinnedSessionIds: ReadonlySet<string>,
+    unreadSessionIds: ReadonlySet<string>,
+    now: number = Date.now(),
 ): TaskItem {
     const machineId = session.metadata?.machineId ?? null;
     const isOnline = isTaskOnline(session);
-    const isRunning = isOnline && isTaskActivelyWorking(session);
     return {
         sessionId: session.id,
         path: session.metadata?.path ?? null,
@@ -124,7 +153,10 @@ export function buildTaskItem(
         createdAt: session.createdAt,
         isPinned: pinnedSessionIds.has(session.id),
         isOnline,
-        isRunning,
+        isRunning: isTaskActive(session, unreadSessionIds, now),
+        hasUnread: unreadSessionIds.has(session.id),
+        draft: session.draft ?? null,
+        hasPendingInput: hasPendingUserInput(session),
     };
 }
 
@@ -140,21 +172,34 @@ export function buildTaskCenterData(
     sessions: readonly Session[],
     machines: Record<string, Machine>,
     pinnedSessionIds: readonly string[],
+    unreadSessionIds: ReadonlySet<string> = new Set(),
+    now: number = Date.now(),
 ): TaskCenterData {
     const pinned = new Set(pinnedSessionIds);
     const running: TaskItem[] = [];
+    const pending: TaskItem[] = [];
     const remaining: TaskItem[] = [];
 
     for (const session of sessions) {
-        const item = buildTaskItem(session, machines, pinned);
-        if (item.isRunning) {
+        const item = buildTaskItem(session, machines, pinned, unreadSessionIds, now);
+        if (item.hasPendingInput) {
+            // Unsubmitted input always pins the session at the bottom.
+            pending.push(item);
+        } else if (item.isRunning) {
             running.push(item);
         } else {
             remaining.push(item);
         }
     }
 
-    running.sort((a, b) => b.updatedAt - a.updatedAt);
+    // Sessions with an in-progress goal stay on top, then by recent activity.
+    running.sort((a, b) => {
+        const aGoal = a.goal?.status === 'active' ? 1 : 0;
+        const bGoal = b.goal?.status === 'active' ? 1 : 0;
+        if (aGoal !== bGoal) return bGoal - aGoal;
+        return b.updatedAt - a.updatedAt;
+    });
+    pending.sort((a, b) => b.updatedAt - a.updatedAt);
 
     const groupMap = new Map<string, TaskProjectGroup>();
     for (const item of remaining) {
@@ -184,8 +229,10 @@ export function buildTaskCenterData(
 
     return {
         running,
+        pending,
         projects,
         runningCount: running.length,
+        pendingCount: pending.length,
         totalCount: sessions.length,
     };
 }

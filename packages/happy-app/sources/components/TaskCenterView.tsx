@@ -5,11 +5,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { t } from '@/text';
 import {
+    storage,
     useAllMachines,
     useAllSessions,
     useLocalSetting,
     useLocalSettingMutable,
     useSessions,
+    useUnreadSessionIds,
 } from '@/sync/storage';
 import type { Machine, Session } from '@/sync/storageTypes';
 import { sessionArchive, sessionKill } from '@/sync/ops';
@@ -34,6 +36,7 @@ const STATUS_CONFIG: Record<TaskRunState, { color: string; isPulsing: boolean }>
     permission_required: { color: '#FF9500', isPulsing: true },
     running: { color: '#34C759', isPulsing: false },
 };
+const PENDING_COLOR = '#FF9F0A';
 
 function getStatusText(state: TaskRunState): string {
     switch (state) {
@@ -51,6 +54,7 @@ type Row =
     | { kind: 'empty-running' }
     | { kind: 'all-header'; count: number }
     | { kind: 'group-header'; group: TaskProjectGroup }
+    | { kind: 'pending-header'; count: number }
     | { kind: 'task'; item: TaskItem };
 
 const SectionHeader = React.memo(({ title, count }: { title: string; count: number }) => {
@@ -94,10 +98,11 @@ const GroupHeader = React.memo(({ group, collapsed, onToggle }: {
     );
 });
 
-const TaskRow = React.memo(({ item, name, onPress }: {
+const TaskRow = React.memo(({ item, name, onPress, onSubmitDraft }: {
     item: TaskItem;
     name: string;
     onPress: () => void;
+    onSubmitDraft?: (item: TaskItem) => void;
 }) => {
     const { theme } = useUnistyles();
     const showActionAlert = useSessionActionAlert(item.sessionId);
@@ -131,9 +136,11 @@ const TaskRow = React.memo(({ item, name, onPress }: {
         })();
     }, [archiving, item]);
 
-    const status = item.isRunning
-        ? STATUS_CONFIG[item.state]
-        : { color: '#999999', isPulsing: false };
+    const status = item.hasPendingInput
+        ? { color: PENDING_COLOR, isPulsing: false }
+        : item.isRunning
+            ? STATUS_CONFIG[item.state]
+            : { color: '#999999', isPulsing: false };
     const progressText = item.goal ? getGoalProgressText(item.goal) : null;
     const tokenProgress = item.goal?.progress?.tokenBudget
         ? Math.min(1, (item.goal.progress.tokensUsed ?? 0) / item.goal.progress.tokenBudget)
@@ -161,12 +168,19 @@ const TaskRow = React.memo(({ item, name, onPress }: {
                     )}
                 </View>
                 <Text style={[styles.rowStatus, { color: status.color }]} numberOfLines={1}>
-                    {item.isRunning
-                        ? getStatusText(item.state) + (pathBasename ? ' · ' + pathBasename : '')
-                        : item.isOnline
-                            ? (pathBasename ? pathBasename + ' · ' + t('taskCenter.statusIdle') : t('taskCenter.statusIdle'))
-                            : (pathBasename || t('status.offline'))}
+                    {item.hasPendingInput
+                        ? t('taskCenter.statusPending') + (pathBasename ? ' · ' + pathBasename : '')
+                        : item.isRunning
+                            ? getStatusText(item.state) + (pathBasename ? ' · ' + pathBasename : '')
+                            : item.isOnline
+                                ? (pathBasename ? pathBasename + ' · ' + t('taskCenter.statusIdle') : t('taskCenter.statusIdle'))
+                                : (pathBasename || t('status.offline'))}
                 </Text>
+                {item.hasPendingInput && item.draft ? (
+                    <Text style={styles.draftPreview} numberOfLines={1}>
+                        {item.draft.replace(/\s+/g, ' ').trim()}
+                    </Text>
+                ) : null}
                 {item.goal ? (
                     <View style={styles.goalContainer}>
                         <Text style={styles.goalText} numberOfLines={1}>
@@ -191,6 +205,17 @@ const TaskRow = React.memo(({ item, name, onPress }: {
                 ) : null}
             </View>
             <View style={styles.rowActions}>
+                {item.hasPendingInput && onSubmitDraft ? (
+                    <Pressable
+                        onPress={() => onSubmitDraft(item)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('taskCenter.forceSubmit')}
+                        style={({ pressed }) => [styles.iconButton, pressed && { backgroundColor: theme.colors.surfacePressed }]}
+                    >
+                        <Ionicons name="send" size={16} color={PENDING_COLOR} />
+                    </Pressable>
+                ) : null}
                 <Pressable
                     onPress={togglePin}
                     hitSlop={8}
@@ -229,6 +254,7 @@ export function TaskCenterView() {
     const sessions = useAllSessions();
     const sessionsReady = useSessions() !== null;
     const machines = useAllMachines({ includeOffline: true });
+    const unreadSessionIds = useUnreadSessionIds();
     const pinnedSessionIds = useLocalSetting('pinnedSessionIds');
     const [collapsedKeys, setCollapsedKeys] = useLocalSettingMutable('collapsedTaskProjectKeys');
     const navigateToSession = useNavigateToSession();
@@ -244,9 +270,22 @@ export function TaskCenterView() {
     const sessionById = React.useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
 
     const data = React.useMemo(
-        () => buildTaskCenterData(sessions, machinesById, pinnedSessionIds),
-        [sessions, machinesById, pinnedSessionIds],
+        () => buildTaskCenterData(sessions, machinesById, pinnedSessionIds, unreadSessionIds),
+        [sessions, machinesById, pinnedSessionIds, unreadSessionIds],
     );
+
+    const forceSubmitDraft = React.useCallback((item: TaskItem) => {
+        const draft = item.draft;
+        if (!draft?.trim()) return;
+        void (async () => {
+            try {
+                await sync.sendMessage(item.sessionId, draft, { source: 'chat' });
+                storage.getState().updateSessionDraft(item.sessionId, null);
+            } catch (error) {
+                console.error('Force submit failed:', error);
+            }
+        })();
+    }, []);
 
     const visibleProjects = React.useMemo(
         () => filterCollapsedProjects(data.projects, collapsedKeys),
@@ -280,6 +319,12 @@ export function TaskCenterView() {
                 }
             }
         }
+        if (data.pending.length > 0) {
+            list.push({ kind: 'pending-header', count: data.pendingCount });
+            for (const item of data.pending) {
+                list.push({ kind: 'task', item });
+            }
+        }
         return list;
     }, [data, visibleProjects, collapsedKeys]);
 
@@ -289,6 +334,7 @@ export function TaskCenterView() {
             case 'empty-running': return 'empty-running';
             case 'all-header': return 'all-header';
             case 'group-header': return 'group-' + row.group.key;
+            case 'pending-header': return 'pending-header';
             case 'task': return 'task-' + row.item.sessionId;
         }
     }, []);
@@ -309,6 +355,8 @@ export function TaskCenterView() {
                         onToggle={() => toggleGroup(item.group.key)}
                     />
                 );
+            case 'pending-header':
+                return <SectionHeader title={t('taskCenter.pending')} count={item.count} />;
             case 'task': {
                 const session = sessionById.get(item.item.sessionId);
                 return (
@@ -316,6 +364,7 @@ export function TaskCenterView() {
                         item={item.item}
                         name={session ? getSessionName(session) : item.item.sessionId}
                         onPress={() => navigateToSession(item.item.sessionId)}
+                        onSubmitDraft={forceSubmitDraft}
                     />
                 );
             }
@@ -456,6 +505,12 @@ const styles = StyleSheet.create((theme) => ({
     rowStatus: {
         fontSize: 12,
         marginTop: 1,
+    },
+    draftPreview: {
+        fontSize: 12,
+        color: theme.colors.textSecondary,
+        marginTop: 2,
+        fontStyle: 'italic',
     },
     goalContainer: {
         marginTop: 5,

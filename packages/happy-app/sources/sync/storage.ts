@@ -1464,6 +1464,10 @@ export function useAllSessions(): Session[] {
     }));
 }
 
+export function useUnreadSessionIds(): ReadonlySet<string> {
+    return storage(useShallow((state) => state.unreadSessionIds));
+}
+
 export function useLocalSettingMutable<K extends keyof LocalSettings>(name: K): [LocalSettings[K], (value: LocalSettings[K]) => void] {
     const setValue = React.useCallback((value: LocalSettings[K]) => {
         storage.getState().applyLocalSettings({ [name]: value });
