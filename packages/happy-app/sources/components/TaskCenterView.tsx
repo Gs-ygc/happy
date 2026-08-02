@@ -14,7 +14,7 @@ import {
     useUnreadSessionIds,
 } from '@/sync/storage';
 import type { Machine, Session } from '@/sync/storageTypes';
-import { sessionArchive, sessionKill } from '@/sync/ops';
+import { sessionAbort, sessionArchive, sessionKill } from '@/sync/ops';
 import { sync } from '@/sync/sync';
 import { useNavigateToSession } from '@/hooks/useNavigateToSession';
 import { useSessionActionAlert } from '@/hooks/useSessionQuickActions';
@@ -279,6 +279,20 @@ export function TaskCenterView() {
         if (!draft?.trim()) return;
         void (async () => {
             try {
+                // Interrupt the running turn first so the draft is processed
+                // immediately instead of waiting for the agent to finish.
+                const session = storage.getState().sessions[item.sessionId];
+                const isWorking = !!session && (
+                    session.thinking
+                    || (session.agentState?.requests && Object.keys(session.agentState.requests).length > 0)
+                );
+                if (isWorking) {
+                    try {
+                        await sessionAbort(item.sessionId);
+                    } catch (error) {
+                        console.log('Force submit: abort unavailable, sending anyway:', error);
+                    }
+                }
                 await sync.sendMessage(item.sessionId, draft, { source: 'chat' });
                 storage.getState().updateSessionDraft(item.sessionId, null);
             } catch (error) {
