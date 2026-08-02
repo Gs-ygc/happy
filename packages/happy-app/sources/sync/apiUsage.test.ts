@@ -31,6 +31,7 @@ describe('normalizeSub2ApiUsage', () => {
             },
             models: [{ model: 'gpt-5.6-sol', requests: 9, input_tokens: 10, output_tokens: 11, cache_creation_tokens: 12, cache_read_tokens: 13, total_tokens: 46, cost: 1.2, actual_cost: 0.8 }],
             trend: [{ date: '2026-08-02', requests: 9, input_tokens: 10, output_tokens: 11, cache_creation_tokens: 12, cache_read_tokens: 13, total_tokens: 46, cost: 1.2, actual_cost: 0.8 }],
+            accounts: [{ id: 1, name: 'PPToken', status: 'active', quota_daily_used: 2, quota_daily_limit: 10, credentials: { api_key: 'must not persist' } } as any],
         }, 123);
 
         expect(result).toEqual({
@@ -47,6 +48,7 @@ describe('normalizeSub2ApiUsage', () => {
             },
             models: [{ model: 'gpt-5.6-sol', requests: 9, input_tokens: 10, output_tokens: 11, cache_creation_tokens: 12, cache_read_tokens: 13, total_tokens: 46, cost: 1.2, actual_cost: 0.8 }],
             trend: [{ date: '2026-08-02', requests: 9, input_tokens: 10, output_tokens: 11, cache_creation_tokens: 12, cache_read_tokens: 13, total_tokens: 46, cost: 1.2, actual_cost: 0.8 }],
+            accounts: [{ id: 1, name: 'PPToken', status: 'active', quota_daily_used: 2, quota_daily_limit: 10 }],
             fetchedAt: 123,
         });
     });

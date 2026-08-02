@@ -43,6 +43,23 @@ export type Sub2ApiDailyUsage = {
     actual_cost: number;
 };
 
+export type Sub2ApiAccount = {
+    id: number;
+    name: string;
+    platform?: string;
+    status?: string;
+    schedulable?: boolean;
+    rate_multiplier?: number;
+    concurrency?: number;
+    quota_daily_used?: number | null;
+    quota_daily_limit?: number | null;
+    quota_weekly_used?: number | null;
+    quota_weekly_limit?: number | null;
+    quota_monthly_used?: number | null;
+    quota_monthly_limit?: number | null;
+    session_window_status?: string;
+};
+
 export type Sub2ApiUsage = {
     user: Sub2ApiUser;
     today: {
@@ -57,6 +74,7 @@ export type Sub2ApiUsage = {
     };
     models: Sub2ApiModelUsage[];
     trend: Sub2ApiDailyUsage[];
+    accounts: Sub2ApiAccount[];
     fetchedAt: number;
 };
 
@@ -176,6 +194,25 @@ function summarizeTrend(trend: Sub2ApiDailyUsage[]): Sub2ApiUsage['today'] {
     });
 }
 
+function sanitizeAccount(account: Sub2ApiAccount): Sub2ApiAccount {
+    return {
+        id: account.id,
+        name: account.name,
+        platform: account.platform,
+        status: account.status,
+        schedulable: account.schedulable,
+        rate_multiplier: account.rate_multiplier,
+        concurrency: account.concurrency,
+        quota_daily_used: account.quota_daily_used,
+        quota_daily_limit: account.quota_daily_limit,
+        quota_weekly_used: account.quota_weekly_used,
+        quota_weekly_limit: account.quota_weekly_limit,
+        quota_monthly_used: account.quota_monthly_used,
+        quota_monthly_limit: account.quota_monthly_limit,
+        session_window_status: account.session_window_status,
+    };
+}
+
 export async function loadSub2ApiConfig(): Promise<Sub2ApiConfig | null> {
     try {
         const value = isWebRuntime()
@@ -220,6 +257,7 @@ export function normalizeSub2ApiUsage(input: {
     stats: Record<string, number>;
     models: Sub2ApiModelUsage[];
     trend: Sub2ApiDailyUsage[];
+    accounts?: Sub2ApiAccount[];
 }, fetchedAt = Date.now()): Sub2ApiUsage {
     const stats = input.stats || {};
     return {
@@ -236,6 +274,7 @@ export function normalizeSub2ApiUsage(input: {
         },
         models: Array.isArray(input.models) ? input.models : [],
         trend: Array.isArray(input.trend) ? input.trend : [],
+        accounts: Array.isArray(input.accounts) ? input.accounts.map(sanitizeAccount) : [],
         fetchedAt,
     };
 }
@@ -247,11 +286,12 @@ export async function fetchSub2ApiUsage(config: Sub2ApiConfig, period: Sub2ApiPe
     const range = getSub2ApiDateRange(new Date(), getPeriodDays(period));
     const params = `?start_date=${encodeURIComponent(range.startDate)}&end_date=${encodeURIComponent(range.endDate)}`;
 
-    const [user, stats, models, trend] = await Promise.all([
+    const [user, stats, models, trend, accounts] = await Promise.all([
         requestJson<Sub2ApiUser>(`${baseUrl}/api/v1/auth/me`, { headers }),
         requestJson<Record<string, number>>(`${baseUrl}/api/v1/admin/dashboard/stats`, { headers }),
         requestJson<{ models?: Sub2ApiModelUsage[] }>(`${baseUrl}/api/v1/admin/dashboard/models${params}`, { headers }),
         requestJson<{ trend?: Sub2ApiDailyUsage[] }>(`${baseUrl}/api/v1/admin/dashboard/trend${params}&granularity=day`, { headers }),
+        requestJson<{ items?: Sub2ApiAccount[] }>(`${baseUrl}/api/v1/admin/accounts?page=1&page_size=100`, { headers }),
     ]);
 
     const trendRows = trend?.trend || [];
@@ -260,6 +300,7 @@ export async function fetchSub2ApiUsage(config: Sub2ApiConfig, period: Sub2ApiPe
         stats,
         models: models?.models || [],
         trend: trendRows,
+        accounts: accounts?.items || [],
     });
     if (period !== 'today') {
         normalized.today = summarizeTrend(trendRows);

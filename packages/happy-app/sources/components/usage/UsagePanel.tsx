@@ -45,6 +45,14 @@ const sub2ApiText = {
     period7d: '近 7 日',
     period30d: '近 30 日',
     periodAll: '全部',
+    accounts: '中转账号与限额',
+    noExplicitLimit: '未设置显式额度',
+    daily: '日',
+    weekly: '周',
+    monthly: '月',
+    accountActive: '可用',
+    accountPaused: '已暂停',
+    accountUnavailable: '不可用',
 };
 
 const styles = StyleSheet.create((theme) => ({
@@ -94,6 +102,17 @@ function formatNumber(value: number): string {
 
 function formatMoney(value: number): string {
     return `$${value.toFixed(value >= 1 ? 2 : 4)}`;
+}
+
+function formatQuota(used?: number | null, limit?: number | null): string {
+    if (used == null && limit == null) return sub2ApiText.noExplicitLimit;
+    const usedText = formatMoney(used || 0);
+    return limit == null ? `${usedText} / ∞` : `${usedText} / ${formatMoney(limit)}`;
+}
+
+function accountStatusLabel(status?: string, schedulable?: boolean): string {
+    if (status !== 'active') return sub2ApiText.accountUnavailable;
+    return schedulable === false ? sub2ApiText.accountPaused : sub2ApiText.accountActive;
 }
 
 async function promptForConfig(current?: Sub2ApiConfig): Promise<Sub2ApiConfig | null> {
@@ -190,6 +209,7 @@ export const UsagePanel: React.FC = () => {
 
     const today = usage?.today;
     const models = [...(usage?.models || [])].sort((a, b) => b.actual_cost - a.actual_cost);
+    const accounts = [...(usage?.accounts || [])].sort((a, b) => a.name.localeCompare(b.name));
     const periodLabel = period === 'today'
         ? sub2ApiText.periodToday
         : period === '7d'
@@ -221,6 +241,22 @@ export const UsagePanel: React.FC = () => {
             <Text style={styles.balance}>{formatMoney(usage?.user.balance || 0)}</Text>
             <Text style={styles.balanceMeta}>{sub2ApiText.frozenBalance}: {formatMoney(usage?.user.frozen_balance || 0)}</Text>
         </View>
+        <ItemGroup title={sub2ApiText.accounts}>
+            {accounts.length ? accounts.map((account) => (
+                <View key={account.id} style={styles.modelRow}>
+                    <View style={styles.modelHeader}>
+                        <Text style={styles.modelName} numberOfLines={1}>{account.name}</Text>
+                        <Text style={styles.modelCost}>{accountStatusLabel(account.status, account.schedulable)}</Text>
+                    </View>
+                    <Text style={styles.modelMeta}>
+                        {sub2ApiText.daily} {formatQuota(account.quota_daily_used, account.quota_daily_limit)} · {sub2ApiText.weekly} {formatQuota(account.quota_weekly_used, account.quota_weekly_limit)}
+                    </Text>
+                    <Text style={styles.modelMeta}>
+                        {sub2ApiText.monthly} {formatQuota(account.quota_monthly_used, account.quota_monthly_limit)} · {account.rate_multiplier ?? 1}x · {account.concurrency ?? 0} 并发
+                    </Text>
+                </View>
+            )) : <Text style={styles.empty}>{t('usage.noData')}</Text>}
+        </ItemGroup>
         <ItemGroup title={periodLabel}>
             <View style={styles.statGrid}>
                 <Metric label={sub2ApiText.requests} value={formatNumber(today?.requests || 0)} />

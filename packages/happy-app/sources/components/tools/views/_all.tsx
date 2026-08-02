@@ -60,6 +60,8 @@ export const toolFullViewRegistry: Record<string, ToolViewComponent> = {
     MultiEdit: MultiEditViewFull,
     Task: TaskView,
     Agent: TaskView,
+    CodexPatch: CodexPatchView,
+    CodexDiff: CodexDiffView,
 };
 
 // Helper function to get the appropriate view component for a tool
