@@ -22,11 +22,12 @@ export const MessageView = React.memo((props: {
   metadata: Metadata | null;
   sessionId: string;
   getMessageById?: (id: string) => Message | null;
+  highlighted?: boolean;
   /** Opens the fork-from-message flow from the message action button. */
   onForkFromUserMessage?: (messageId: string, rewindPointId: string | undefined, messageText: string) => void;
 }) => {
   return (
-    <View style={styles.messageContainer}>
+    <View style={[styles.messageContainer, props.highlighted && styles.messageHighlighted]}>
       <View style={styles.messageContent}>
         <RenderBlock
           message={props.message}
@@ -372,6 +373,9 @@ const styles = StyleSheet.create((theme) => ({
   messageContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
+  },
+  messageHighlighted: {
+    backgroundColor: theme.colors.textLink + '20',
   },
   messageContent: {
     flexDirection: 'column',

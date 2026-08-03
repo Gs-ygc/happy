@@ -625,6 +625,23 @@ export const zhHant: TranslationStructure = {
         }
     },
 
+    sessionSearch: {
+        title: '搜尋訊息',
+        open: '搜尋訊息',
+        placeholder: '搜尋目前對話',
+        search: '搜尋',
+        clear: '清除搜尋',
+        searching: ({ scanned, matches }: { scanned: number; matches: number }) => `已掃描 ${scanned} 則訊息 · ${matches} 個結果`,
+        resultCount: ({ count }: { count: number }) => `${count} 個結果`,
+        noResults: '沒有符合的訊息',
+        loadFailed: '搜尋失敗，請重試',
+        truncated: '僅顯示前 200 個結果',
+        user: '你',
+        assistant: 'Agent',
+        jumpFailedTitle: '訊息無法使用',
+        jumpFailedMessage: '無法載入這則訊息，請重新搜尋。',
+    },
+
     files: {
         changes: '變更',
         searchPlaceholder: '搜尋檔案...',

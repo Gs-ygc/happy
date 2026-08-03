@@ -625,6 +625,13 @@ export const es: TranslationStructure = {
         }
     },
 
+    sessionSearch: {
+        title: 'Search messages', open: 'Search messages', placeholder: 'Search this conversation', search: 'Search', clear: 'Clear search',
+        searching: ({ scanned, matches }: { scanned: number; matches: number }) => `Scanned ${scanned} messages · ${matches} matches`,
+        resultCount: ({ count }: { count: number }) => `${count} matches`, noResults: 'No matching messages', loadFailed: 'Search failed. Please try again.',
+        truncated: 'First 200 matches', user: 'You', assistant: 'Agent', jumpFailedTitle: 'Message unavailable', jumpFailedMessage: 'The message could not be loaded. Try searching again.',
+    },
+
     files: {
         changes: 'Cambios',
         searchPlaceholder: 'Buscar archivos...',

@@ -106,10 +106,11 @@ interface AgentWorkGroupViewProps {
     sessionId: string;
     expanded: boolean;
     onToggle: () => void;
+    highlightedMessageId?: string | null;
 }
 
 export const AgentWorkGroupView = React.memo<AgentWorkGroupViewProps>((props) => {
-    const { group, metadata, sessionId, expanded, onToggle } = props;
+    const { group, metadata, sessionId, expanded, onToggle, highlightedMessageId } = props;
     const isCompleted = group.completedAt !== null;
     const runningElapsedSeconds = useElapsedTime(group.completedAt === null ? group.startedAt : null);
     const durationMs = group.completedAt === null
@@ -186,9 +187,10 @@ export const AgentWorkGroupView = React.memo<AgentWorkGroupViewProps>((props) =>
                 message={item.message}
                 metadata={metadata}
                 sessionId={sessionId}
+                highlighted={item.message.id === highlightedMessageId}
             />
         );
-    }, [collapsedToolGroups, handleToggleNestedGroup, metadata, sessionId]);
+    }, [collapsedToolGroups, handleToggleNestedGroup, highlightedMessageId, metadata, sessionId]);
 
     return (
         <View style={styles.outerContainer}>

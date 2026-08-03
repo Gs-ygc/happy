@@ -18,6 +18,9 @@ import { Modal } from '@/modal';
 import { useSessionQuickActions } from '@/hooks/useSessionQuickActions';
 import { resolveControlMode } from '@/sync/controlHandoff';
 import { usesControlledSessionUi } from '@/sync/rig';
+import { useSessionMessageSearchNav } from '@/-session/sessionMessageSearchNav';
+import { findDisplayItemIndexForMessage } from '@/utils/sessionMessageSearch';
+import { t } from '@/text';
 
 const SCROLL_THRESHOLD = 300;
 
@@ -71,6 +74,11 @@ const ChatListInternal = React.memo((props: {
     const flatListRef = React.useRef<FlatList>(null);
     const [showScrollButton, setShowScrollButton] = React.useState(false);
     const [handoffListRevision, setHandoffListRevision] = React.useState(0);
+    const [pendingSearchMessageId, setPendingSearchMessageId] = React.useState<string | null>(null);
+    const [highlightedMessageId, setHighlightedMessageId] = React.useState<string | null>(null);
+    const searchJump = useSessionMessageSearchNav((state) => state.jump);
+    const handledSearchJumpRef = React.useRef<number | null>(null);
+    const highlightTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     // Tracks whether the scroll-button is currently shown, so we only call
     // setShowScrollButton when the threshold is actually crossed instead of
     // on every scroll frame (60Hz). Without this guard, the entire list
@@ -176,6 +184,68 @@ const ChatListInternal = React.memo((props: {
         });
     }, []);
 
+    React.useEffect(() => {
+        if (!searchJump || searchJump.sessionId !== props.sessionId) return;
+        if (handledSearchJumpRef.current === searchJump.requestId) return;
+        handledSearchJumpRef.current = searchJump.requestId;
+
+        let cancelled = false;
+        void sync.loadSearchResult(props.sessionId, searchJump.result, searchJump.query)
+            .then((messageId) => {
+                if (cancelled) return;
+                if (!messageId) {
+                    Modal.alert(t('sessionSearch.jumpFailedTitle'), t('sessionSearch.jumpFailedMessage'));
+                    return;
+                }
+                setPendingSearchMessageId(messageId);
+            })
+            .catch((error) => {
+                if (cancelled) return;
+                console.error('Failed to load message search result:', error);
+                Modal.alert(t('sessionSearch.jumpFailedTitle'), t('sessionSearch.jumpFailedMessage'));
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    useSessionMessageSearchNav.getState().clearJump(searchJump.requestId);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [props.sessionId, searchJump]);
+
+    React.useEffect(() => {
+        if (!pendingSearchMessageId) return;
+        const location = findDisplayItemIndexForMessage(displayItems, pendingSearchMessageId);
+        if (!location) return;
+
+        if (location.groupId) {
+            manuallyCollapsedRef.current.delete(location.groupId);
+            setCollapsedGroups((previous) => {
+                if (!previous.has(location.groupId!)) return previous;
+                const next = new Set(previous);
+                next.delete(location.groupId!);
+                return next;
+            });
+        }
+
+        if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+        setHighlightedMessageId(pendingSearchMessageId);
+        setPendingSearchMessageId(null);
+        const scroll = () => flatListRef.current?.scrollToIndex({
+            index: location.index,
+            animated: true,
+            viewPosition: 0.5,
+        });
+        requestAnimationFrame(() => requestAnimationFrame(scroll));
+        highlightTimerRef.current = setTimeout(() => setHighlightedMessageId(null), 2600);
+    }, [displayItems, pendingSearchMessageId]);
+
+    React.useEffect(() => () => {
+        if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    }, []);
+
     const keyExtractor = useCallback((item: DisplayItem) => item.id, []);
 
     // The message action button opens fork-from-this-message. It uses the same canFork gate as
@@ -217,6 +287,7 @@ const ChatListInternal = React.memo((props: {
                     sessionId={props.sessionId}
                     expanded={!collapsedGroups.has(item.id)}
                     onToggle={() => handleToggleGroup(item.id)}
+                    highlightedMessageId={highlightedMessageId}
                 />
             );
         }
@@ -226,9 +297,10 @@ const ChatListInternal = React.memo((props: {
                 metadata={props.metadata}
                 sessionId={props.sessionId}
                 onForkFromUserMessage={canFork ? handleForkFromMessage : undefined}
+                highlighted={item.message.id === highlightedMessageId}
             />
         );
-    }, [props.metadata, props.sessionId, canFork, handleForkFromMessage, collapsedGroups, handleToggleGroup]);
+    }, [props.metadata, props.sessionId, canFork, handleForkFromMessage, collapsedGroups, handleToggleGroup, highlightedMessageId]);
 
     // In inverted FlatList, offset 0 = latest messages (visual bottom).
     // Offset increases as user scrolls up to see older messages.
@@ -310,6 +382,11 @@ const ChatListInternal = React.memo((props: {
                 ListFooterComponent={<ListHeader isLoadingOlder={props.isLoadingOlder} />}
                 onEndReached={handleLoadOlder}
                 onEndReachedThreshold={0.5}
+                onScrollToIndexFailed={({ index }) => {
+                    setTimeout(() => {
+                        flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+                    }, 120);
+                }}
                 initialNumToRender={10}
                 maxToRenderPerBatch={6}
                 updateCellsBatchingPeriod={32}

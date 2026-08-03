@@ -69,10 +69,27 @@ import { Modal } from '@/modal';
 import { t } from '@/text';
 import { isRigMetadataV1, rigCanUseAttachments, usesControlledSessionUi } from './rig';
 import { fetchGitHubNativeUpdate } from '@/utils/githubNativeUpdate';
+import {
+    SESSION_SEARCH_RESULT_LIMIT,
+    createSessionMessageSearchResult,
+    findLoadedMessageForSearchResult,
+    type SessionMessageSearchResult,
+} from '@/utils/sessionMessageSearch';
 
 type V3GetSessionMessagesResponse = {
     messages: ApiMessage[];
     hasMore: boolean;
+};
+
+export type SessionMessageSearchResponse = {
+    results: SessionMessageSearchResult[];
+    scanned: number;
+    truncated: boolean;
+};
+
+export type SessionMessageSearchProgress = {
+    scanned: number;
+    matches: number;
 };
 
 // Sentinel used as `before_seq` for the very first backward fetch of a
@@ -1922,6 +1939,7 @@ class Sync {
 
             const knownLastSeq = this.sessionLastSeq.get(sessionId);
             const isInitialLoad = knownLastSeq === undefined;
+            let initialPagination: { hasMore: boolean } | null = null;
             if (isInitialLoad) {
                 // Initial load. Pull only the most recent page so the user can
                 // start chatting immediately. Older history is fetched only
@@ -1931,7 +1949,7 @@ class Sync {
                 // Each appended page rebuilds the message list and grouping;
                 // automatically draining a long session eventually exhausts
                 // memory and blocks the JS thread on Android tablets.
-                await this.fetchInitialLatestPage(sessionId, encryption);
+                initialPagination = await this.fetchInitialLatestPage(sessionId, encryption);
             } else {
                 // Forward incremental sync. Used after reconnect, invalidate,
                 // or any subsequent visit. Only pulls messages newer than what
@@ -1940,6 +1958,12 @@ class Sync {
             }
 
             storage.getState().applyMessagesLoaded(sessionId);
+            if (initialPagination) {
+                // A page can contain only lifecycle/usage records that produce
+                // no visible rows. Preserve its backward cursor after creating
+                // the SessionMessages entry so the UI can continue paging.
+                storage.getState().applyOlderMessagesPagination(sessionId, initialPagination);
+            }
             log.log(`💬 fetchMessages completed for session ${sessionId}`);
         });
     }
@@ -1947,7 +1971,7 @@ class Sync {
     private fetchInitialLatestPage = async (
         sessionId: string,
         encryption: ReturnType<Encryption['getSessionEncryption']> & {}
-    ) => {
+    ): Promise<{ hasMore: boolean }> => {
         const response = await apiSocket.request(
             `/v3/sessions/${sessionId}/messages?before_seq=${SEQ_BACKWARD_INITIAL_SENTINEL}&limit=100`
         );
@@ -1971,9 +1995,9 @@ class Sync {
         if (messages.length > 0) {
             this.sessionOldestSeq.set(sessionId, minSeq);
         }
-        storage.getState().applyOlderMessagesPagination(sessionId, {
+        return {
             hasMore: !!data.hasMore && messages.length > 0
-        });
+        };
     }
 
     private fetchForwardSince = async (
@@ -2085,6 +2109,105 @@ class Sync {
         } finally {
             storage.getState().applyOlderMessagesLoading(sessionId, false);
         }
+    }
+
+    searchSessionMessages = async (
+        sessionId: string,
+        query: string,
+        options?: {
+            signal?: AbortSignal;
+            onProgress?: (progress: SessionMessageSearchProgress) => void;
+        },
+    ): Promise<SessionMessageSearchResponse> => {
+        const encryption = this.encryption.getSessionEncryption(sessionId);
+        if (!encryption) {
+            throw new Error(`Session encryption not ready for ${sessionId}`);
+        }
+
+        const results: SessionMessageSearchResult[] = [];
+        let scanned = 0;
+        let beforeSeq = SEQ_BACKWARD_INITIAL_SENTINEL;
+        let truncated = false;
+
+        while (true) {
+            const response = await apiSocket.request(
+                `/v3/sessions/${sessionId}/messages?before_seq=${beforeSeq}&limit=250`,
+                { signal: options?.signal },
+            );
+            if (!response.ok) {
+                throw new Error(`Failed to search messages for ${sessionId}: ${response.status}`);
+            }
+
+            const data = await response.json() as V3GetSessionMessagesResponse;
+            const messages = Array.isArray(data.messages) ? data.messages : [];
+            if (messages.length === 0) break;
+
+            const decryptedMessages = await encryption.decryptMessages(messages);
+            for (let index = 0; index < messages.length; index += 1) {
+                const decrypted = decryptedMessages[index];
+                if (!decrypted?.content) continue;
+                const normalized = normalizeRawMessage(
+                    decrypted.id,
+                    decrypted.localId,
+                    decrypted.createdAt,
+                    decrypted.content,
+                );
+                if (!normalized) continue;
+                const result = createSessionMessageSearchResult(messages[index], normalized, query);
+                if (result) {
+                    results.push(result);
+                    if (results.length >= SESSION_SEARCH_RESULT_LIMIT) {
+                        truncated = !!data.hasMore || index < messages.length - 1;
+                        break;
+                    }
+                }
+            }
+
+            scanned += messages.length;
+            options?.onProgress?.({ scanned, matches: results.length });
+            if (results.length >= SESSION_SEARCH_RESULT_LIMIT || !data.hasMore) break;
+
+            let minSeq = beforeSeq;
+            for (const message of messages) {
+                if (message.seq < minSeq) minSeq = message.seq;
+            }
+            if (minSeq >= beforeSeq) break;
+            beforeSeq = minSeq;
+        }
+
+        return { results, scanned, truncated };
+    }
+
+    loadSearchResult = async (
+        sessionId: string,
+        result: SessionMessageSearchResult,
+        query: string,
+    ): Promise<string | null> => {
+        const existingMessages = storage.getState().sessionMessages[sessionId]?.messages ?? [];
+        const existing = findLoadedMessageForSearchResult(existingMessages, result, query);
+        if (existing) return existing;
+
+        const encryption = this.encryption.getSessionEncryption(sessionId);
+        if (!encryption) {
+            throw new Error(`Session encryption not ready for ${sessionId}`);
+        }
+
+        const lock = this.getSessionMessageLock(sessionId);
+        return lock.inLock(async () => {
+            const beforeSeq = Math.min(SEQ_BACKWARD_INITIAL_SENTINEL, result.seq + 1);
+            const response = await apiSocket.request(
+                `/v3/sessions/${sessionId}/messages?before_seq=${beforeSeq}&limit=100`,
+            );
+            if (!response.ok) {
+                throw new Error(`Failed to load search result for ${sessionId}: ${response.status}`);
+            }
+            const data = await response.json() as V3GetSessionMessagesResponse;
+            const messages = Array.isArray(data.messages) ? data.messages : [];
+            await this.applyFetchedMessages(sessionId, encryption, messages);
+
+            const loadedMessages = storage.getState().sessionMessages[sessionId]?.messages ?? [];
+            return findLoadedMessageForSearchResult(loadedMessages, result, query);
+        });
     }
 
     private registerPushToken = async () => {

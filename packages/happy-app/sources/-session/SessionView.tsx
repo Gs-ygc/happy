@@ -219,20 +219,32 @@ export const SessionView = React.memo((props: { id: string }) => {
                 : undefined,
         };
     }, [session, isDataReady]);
-    const headerRight = session && deviceType === 'phone' && Platform.OS !== 'web'
+    const headerRight = session
         ? (
-            <Pressable
-                onPress={() => router.push(`/session/${sessionId}/info`)}
-                hitSlop={10}
-            >
-                <Avatar
-                    id={getSessionAvatarId(session)}
-                    size={28}
-                    monochrome={!headerProps.isConnected}
-                    flavor={session.metadata?.flavor}
-                    clientId={session.metadata?.client?.id}
-                />
-            </Pressable>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('sessionSearch.open')}
+                    onPress={() => router.push(`/session/${sessionId}/search`)}
+                    hitSlop={10}
+                >
+                    <Ionicons name="search-outline" size={22} color={theme.colors.header.tint} />
+                </Pressable>
+                {deviceType === 'phone' && Platform.OS !== 'web' && (
+                    <Pressable
+                        onPress={() => router.push(`/session/${sessionId}/info`)}
+                        hitSlop={10}
+                    >
+                        <Avatar
+                            id={getSessionAvatarId(session)}
+                            size={28}
+                            monochrome={!headerProps.isConnected}
+                            flavor={session.metadata?.flavor}
+                            clientId={session.metadata?.client?.id}
+                        />
+                    </Pressable>
+                )}
+            </View>
         )
         : null;
 
@@ -458,10 +470,16 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
     const deviceType = useDeviceType();
     const isTablet = useIsTablet();
     const realtimeStatus = useRealtimeStatus();
-    const { hasMessages, isLoaded } = useSessionMessageStatus(sessionId);
+    const { hasMessages, isLoaded, hasMoreOlder, isLoadingOlder } = useSessionMessageStatus(sessionId);
     const acknowledgedCliVersions = useLocalSetting('acknowledgedCliVersions');
     const zenMode = useLocalSetting('zenMode');
     const sessionInputHorizontalPadding = Platform.OS === 'web' || isRunningOnMac() || isTablet ? 12 : 8;
+
+    React.useEffect(() => {
+        if (isLoaded && !hasMessages && hasMoreOlder && !isLoadingOlder) {
+            void sync.loadOlderMessages(sessionId);
+        }
+    }, [hasMessages, hasMoreOlder, isLoaded, isLoadingOlder, sessionId]);
 
     // Check if CLI version is outdated and not already acknowledged
     const cliVersion = session.metadata?.version;

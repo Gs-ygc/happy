@@ -1414,12 +1414,16 @@ export function useSessionMessages(sessionId: string): {
 export function useSessionMessageStatus(sessionId: string): {
     hasMessages: boolean,
     isLoaded: boolean,
+    hasMoreOlder: boolean,
+    isLoadingOlder: boolean,
 } {
     return storage(useShallow((state) => {
         const session = state.sessionMessages[sessionId];
         return {
             hasMessages: (session?.messages.length ?? 0) > 0,
             isLoaded: session?.isLoaded ?? false,
+            hasMoreOlder: session?.hasMoreOlder ?? false,
+            isLoadingOlder: session?.isLoadingOlder ?? false,
         };
     }));
 }

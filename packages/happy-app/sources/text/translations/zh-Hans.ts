@@ -626,6 +626,23 @@ export const zhHans: TranslationStructure = {
         }
     },
 
+    sessionSearch: {
+        title: '搜索消息',
+        open: '搜索消息',
+        placeholder: '搜索当前会话',
+        search: '搜索',
+        clear: '清除搜索',
+        searching: ({ scanned, matches }: { scanned: number; matches: number }) => `已扫描 ${scanned} 条消息 · ${matches} 个结果`,
+        resultCount: ({ count }: { count: number }) => `${count} 个结果`,
+        noResults: '没有匹配的消息',
+        loadFailed: '搜索失败，请重试',
+        truncated: '仅显示前 200 个结果',
+        user: '你',
+        assistant: 'Agent',
+        jumpFailedTitle: '消息不可用',
+        jumpFailedMessage: '无法加载这条消息，请重新搜索。',
+    },
+
     files: {
         changes: '更改',
         searchPlaceholder: '搜索文件...',
