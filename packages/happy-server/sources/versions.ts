@@ -4,6 +4,6 @@ export const IOS_UP_TO_DATE = '>=1.4.1';
 // (e.g. 1.7.1 builds 153 and 154), so the server prefers a numeric
 // versionCode comparison over the semver range above whenever the client
 // reports its build number.
-export const ANDROID_LATEST_VERSION_CODE = 159;
+export const ANDROID_LATEST_VERSION_CODE = 160;
 export const ANDROID_LATEST_APK_URL =
-    'https://github.com/Gs-ygc/happy/releases/download/native-21-159/happy-v1.7.1-159-activity-window.apk';
+    'https://github.com/Gs-ygc/happy/releases/download/native-21-160/happy-v1.7.1-160-task-center-unread-folding.apk';
