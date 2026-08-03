@@ -25,7 +25,6 @@ import { StatusDot } from './StatusDot';
 import { layout } from './layout';
 import {
     buildTaskCenterData,
-    filterCollapsedProjects,
     type TaskItem,
     type TaskProjectGroup,
     type TaskRunState,
@@ -37,6 +36,7 @@ const STATUS_CONFIG: Record<TaskRunState, { color: string; isPulsing: boolean }>
     running: { color: '#34C759', isPulsing: false },
 };
 const PENDING_COLOR = '#FF9F0A';
+const ALL_SECTION_COLLAPSE_KEY = '__task_center_all__';
 
 function getStatusText(state: TaskRunState): string {
     switch (state) {
@@ -57,14 +57,57 @@ type Row =
     | { kind: 'pending-header'; count: number }
     | { kind: 'task'; item: TaskItem };
 
-const SectionHeader = React.memo(({ title, count }: { title: string; count: number }) => {
+const SectionHeader = React.memo(({ title, count, collapsed, onToggle, onAction, actionLabel }: {
+    title: string;
+    count: number;
+    collapsed?: boolean;
+    onToggle?: () => void;
+    onAction?: () => void;
+    actionLabel?: string;
+}) => {
     const { theme } = useUnistyles();
-    return (
-        <View style={styles.sectionHeader}>
+    const content = (
+        <>
+            {onToggle ? (
+                <Ionicons
+                    name={collapsed ? 'chevron-forward' : 'chevron-down'}
+                    size={16}
+                    color={theme.colors.textSecondary}
+                />
+            ) : null}
             <Text style={styles.sectionTitle}>{title}</Text>
             <View style={[styles.sectionCountBadge, { backgroundColor: theme.colors.surfaceHigh }]}>
                 <Text style={styles.sectionCountText}>{count}</Text>
             </View>
+        </>
+    );
+
+    return (
+        <View style={styles.sectionHeader}>
+            {onToggle ? (
+                <Pressable
+                    onPress={onToggle}
+                    accessibilityRole="button"
+                    accessibilityLabel={collapsed ? t('taskCenter.expandAll') : t('taskCenter.collapseAll')}
+                    style={({ pressed }) => [styles.sectionHeaderMain, pressed && { opacity: 0.65 }]}
+                >
+                    {content}
+                </Pressable>
+            ) : (
+                <View style={styles.sectionHeaderMain}>{content}</View>
+            )}
+            {onAction && actionLabel ? (
+                <Pressable
+                    onPress={onAction}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={actionLabel}
+                    style={({ pressed }) => [styles.sectionAction, pressed && { backgroundColor: theme.colors.surfacePressed }]}
+                >
+                    <Ionicons name="checkmark-done" size={19} color={theme.colors.textLink} />
+                    <Text style={styles.sectionActionText}>{actionLabel}</Text>
+                </Pressable>
+            ) : null}
         </View>
     );
 });
@@ -163,6 +206,7 @@ const TaskRow = React.memo(({ item, name, onPress, onSubmitDraft }: {
                     <Text style={styles.rowTitle} numberOfLines={1}>
                         {name}
                     </Text>
+                    {item.hasUnread ? <View style={styles.unreadDot} /> : null}
                     {item.isPinned && (
                         <Ionicons name="pin" size={12} color={theme.colors.textSecondary} style={styles.rowPin} />
                     )}
@@ -301,11 +345,6 @@ export function TaskCenterView() {
         })();
     }, []);
 
-    const visibleProjects = React.useMemo(
-        () => filterCollapsedProjects(data.projects, collapsedKeys),
-        [data.projects, collapsedKeys],
-    );
-
     const toggleGroup = React.useCallback((key: string) => {
         setCollapsedKeys(
             collapsedKeys.includes(key)
@@ -313,6 +352,11 @@ export function TaskCenterView() {
                 : [...collapsedKeys, key],
         );
     }, [collapsedKeys, setCollapsedKeys]);
+
+    const allCollapsed = collapsedKeys.includes(ALL_SECTION_COLLAPSE_KEY);
+    const clearAllUnread = React.useCallback(() => {
+        storage.getState().markAllSessionsRead();
+    }, []);
 
     const rows = React.useMemo(() => {
         const list: Row[] = [];
@@ -324,12 +368,16 @@ export function TaskCenterView() {
             list.push({ kind: 'task', item });
         }
         list.push({ kind: 'all-header', count: data.projects.reduce((n, group) => n + group.items.length, 0) });
-        const collapsed = new Set(collapsedKeys);
-        for (const group of visibleProjects) {
-            list.push({ kind: 'group-header', group });
-            if (!collapsed.has(group.key)) {
-                for (const item of group.items) {
-                    list.push({ kind: 'task', item });
+        if (!allCollapsed) {
+            const collapsed = new Set(collapsedKeys);
+            for (const group of data.projects) {
+                // Keep the header visible when collapsed so the group can always
+                // be expanded again. Only its task rows are hidden.
+                list.push({ kind: 'group-header', group });
+                if (!collapsed.has(group.key)) {
+                    for (const item of group.items) {
+                        list.push({ kind: 'task', item });
+                    }
                 }
             }
         }
@@ -340,7 +388,7 @@ export function TaskCenterView() {
             }
         }
         return list;
-    }, [data, visibleProjects, collapsedKeys]);
+    }, [data, collapsedKeys, allCollapsed]);
 
     const keyExtractor = React.useCallback((row: Row) => {
         switch (row.kind) {
@@ -356,11 +404,25 @@ export function TaskCenterView() {
     const renderItem = React.useCallback(({ item }: { item: Row }) => {
         switch (item.kind) {
             case 'running-header':
-                return <SectionHeader title={t('taskCenter.running')} count={item.count} />;
+                return (
+                    <SectionHeader
+                        title={t('taskCenter.running')}
+                        count={item.count}
+                        onAction={unreadSessionIds.size > 0 ? clearAllUnread : undefined}
+                        actionLabel={unreadSessionIds.size > 0 ? t('taskCenter.markAllRead') : undefined}
+                    />
+                );
             case 'empty-running':
                 return <Text style={styles.emptyRunningText}>{t('taskCenter.noRunning')}</Text>;
             case 'all-header':
-                return <SectionHeader title={t('taskCenter.all')} count={item.count} />;
+                return (
+                    <SectionHeader
+                        title={t('taskCenter.all')}
+                        count={item.count}
+                        collapsed={allCollapsed}
+                        onToggle={() => toggleGroup(ALL_SECTION_COLLAPSE_KEY)}
+                    />
+                );
             case 'group-header':
                 return (
                     <GroupHeader
@@ -383,7 +445,7 @@ export function TaskCenterView() {
                 );
             }
         }
-    }, [collapsedKeys, toggleGroup, sessionById, navigateToSession]);
+    }, [allCollapsed, clearAllUnread, collapsedKeys, toggleGroup, sessionById, navigateToSession, unreadSessionIds.size]);
 
     if (!sessionsReady) {
         return <View style={styles.container} />;
@@ -431,11 +493,19 @@ const styles = StyleSheet.create((theme) => ({
     sectionHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
         paddingTop: 18,
         paddingBottom: 6,
     },
+    sectionHeaderMain: {
+        flex: 1,
+        minWidth: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+    },
     sectionTitle: {
+        flex: 1,
+        minWidth: 0,
         fontSize: 17,
         fontWeight: '700',
         color: theme.colors.text,
@@ -447,6 +517,21 @@ const styles = StyleSheet.create((theme) => ({
         paddingHorizontal: 7,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    sectionAction: {
+        height: 32,
+        marginLeft: 6,
+        paddingHorizontal: 8,
+        borderRadius: 8,
+        flexDirection: 'row',
+        gap: 4,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    sectionActionText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: theme.colors.textLink,
     },
     sectionCountText: {
         fontSize: 12,
@@ -515,6 +600,13 @@ const styles = StyleSheet.create((theme) => ({
     },
     rowPin: {
         marginLeft: 5,
+    },
+    unreadDot: {
+        width: 7,
+        height: 7,
+        marginLeft: 6,
+        borderRadius: 4,
+        backgroundColor: theme.colors.status.error,
     },
     rowStatus: {
         fontSize: 12,

@@ -242,6 +242,7 @@ interface StorageState {
     unreadSessionIds: Set<string>;
     currentViewingSessionId: string | null;
     markSessionRead: (sessionId: string) => void;
+    markAllSessionsRead: () => void;
     markSessionUnread: (sessionId: string) => void;
     setCurrentViewingSession: (sessionId: string | null) => void;
 }
@@ -1193,15 +1194,24 @@ export const storage = create<StorageState>()((set, get) => {
             delete drafts[sessionId];
             saveSessionDrafts(drafts);
             
+            const unreadSessionIds = state.unreadSessionIds.has(sessionId)
+                ? (() => {
+                    const next = new Set(state.unreadSessionIds);
+                    next.delete(sessionId);
+                    return next;
+                })()
+                : state.unreadSessionIds;
+
             // Rebuild sessionListViewData without the deleted session
-            const sessionListViewData = buildSessionListViewData(remainingSessions, state.unreadSessionIds);
+            const sessionListViewData = buildSessionListViewData(remainingSessions, unreadSessionIds);
             
             return {
                 ...state,
                 sessions: remainingSessions,
                 sessionMessages: remainingSessionMessages,
                 sessionFileCache: remainingFileCache,
-                sessionListViewData
+                sessionListViewData,
+                unreadSessionIds,
             };
         }),
         // Friend management methods
@@ -1331,6 +1341,15 @@ export const storage = create<StorageState>()((set, get) => {
             if (!state.unreadSessionIds.has(sessionId)) return state;
             const next = new Set(state.unreadSessionIds);
             next.delete(sessionId);
+            return {
+                ...state,
+                unreadSessionIds: next,
+                sessionListViewData: buildSessionListViewData(state.sessions, next),
+            };
+        }),
+        markAllSessionsRead: () => set((state) => {
+            if (state.unreadSessionIds.size === 0) return state;
+            const next = new Set<string>();
             return {
                 ...state,
                 unreadSessionIds: next,

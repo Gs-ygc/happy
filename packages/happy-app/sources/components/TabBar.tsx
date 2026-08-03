@@ -6,8 +6,7 @@ import { Image } from 'expo-image';
 import { t } from '@/text';
 import { Typography } from '@/constants/Typography';
 import { layout } from '@/components/layout';
-import { useAllSessions } from '@/sync/storage';
-import { isTaskRunning } from '@/utils/taskCenterData';
+import { useAllSessions, useUnreadSessionIds } from '@/sync/storage';
 
 export type TabType = 'tasks' | 'sessions' | 'settings';
 
@@ -84,9 +83,13 @@ export const TabBar = React.memo(({ activeTab, onTabPress }: TabBarProps) => {
     const { theme } = useUnistyles();
     const insets = useSafeAreaInsets();
     const sessions = useAllSessions();
-    const runningTaskCount = React.useMemo(
-        () => sessions.filter(isTaskRunning).length,
-        [sessions],
+    const unreadSessionIds = useUnreadSessionIds();
+    const unreadTaskCount = React.useMemo(
+        () => sessions.reduce(
+            (count, session) => count + (unreadSessionIds.has(session.id) ? 1 : 0),
+            0,
+        ),
+        [sessions, unreadSessionIds],
     );
 
     const tabs: { key: TabType; icon: any; label: string }[] = React.useMemo(() => {
@@ -118,10 +121,10 @@ export const TabBar = React.memo(({ activeTab, onTabPress }: TabBarProps) => {
                                     style={[{ width: 24, height: 24 }]}
                                     tintColor={isActive ? theme.colors.text : theme.colors.textSecondary}
                                 />
-                                {tab.key === 'tasks' && runningTaskCount > 0 && (
+                                {tab.key === 'tasks' && unreadTaskCount > 0 && (
                                     <View style={styles.badge}>
                                         <Text style={styles.badgeText}>
-                                            {runningTaskCount > 99 ? '99+' : runningTaskCount}
+                                            {unreadTaskCount > 99 ? '99+' : unreadTaskCount}
                                         </Text>
                                     </View>
                                 )}

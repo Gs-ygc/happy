@@ -4,7 +4,6 @@ import {
     OTHER_PROJECT_KEY,
     TASK_IDLE_TIMEOUT_MS,
     buildTaskCenterData,
-    filterCollapsedProjects,
     getTaskRunState,
     isTaskActivelyWorking,
     isTaskActive,
@@ -223,24 +222,24 @@ describe('buildTaskCenterData', () => {
         expect(data.running.map((item) => item.sessionId)).toEqual(['goal-1', 'recent-1']);
     });
 
-    it('groups remaining sessions by project path and sorts groups by path', () => {
+    it('sorts project groups and their sessions by most recent activity', () => {
         const a = withPath(sessionWith({ id: 'a1', active: false, presence: 1, updatedAt: 3000 }), '/tmp/zed');
         const b = withPath(sessionWith({ id: 'b1', active: false, presence: 1, updatedAt: 2000 }), '/tmp/alpha');
         const c = withPath(sessionWith({ id: 'c1', active: false, presence: 1, updatedAt: 4000 }), '/tmp/zed');
         const data = buildTaskCenterData([a, b, c], noMachines, []);
 
-        expect(data.projects.map((group) => group.displayPath)).toEqual(['/tmp/alpha', '/tmp/zed']);
-        const zed = data.projects[1];
+        expect(data.projects.map((group) => group.displayPath)).toEqual(['/tmp/zed', '/tmp/alpha']);
+        const zed = data.projects[0];
         expect(zed.items.map((item) => item.sessionId)).toEqual(['c1', 'a1']);
     });
 
-    it('puts sessions without a path into the "other" bucket last', () => {
+    it('puts sessions without a path into the "other" bucket', () => {
         const noPath = sessionWith({ id: 'nopath', metadata: { claudeSessionId: 'c-1' } as any, active: false, presence: 1 });
         const withPath = sessionWith({ id: 'withpath', active: false, presence: 1 });
         const data = buildTaskCenterData([noPath, withPath], noMachines, []);
 
-        expect(data.projects[data.projects.length - 1].key).toBe(OTHER_PROJECT_KEY);
-        expect(data.projects[data.projects.length - 1].items.map((item) => item.sessionId)).toEqual(['nopath']);
+        const other = data.projects.find((group) => group.key === OTHER_PROJECT_KEY);
+        expect(other?.items.map((item) => item.sessionId)).toEqual(['nopath']);
     });
 
     it('resolves the machine display name with fallbacks', () => {
@@ -303,21 +302,5 @@ describe('buildTaskCenterData', () => {
         });
         const data = buildTaskCenterData([session], noMachines, []);
         expect(data.projects[0].items[0].goal).toBeNull();
-    });
-});
-
-describe('filterCollapsedProjects', () => {
-    it('keeps everything when nothing is collapsed', () => {
-        const projects = [{ key: 'a', displayPath: '/a', machineName: '', items: [] }];
-        expect(filterCollapsedProjects(projects, [])).toHaveLength(1);
-    });
-
-    it('removes collapsed groups by key', () => {
-        const projects = [
-            { key: 'a', displayPath: '/a', machineName: '', items: [] },
-            { key: 'b', displayPath: '/b', machineName: '', items: [] },
-        ];
-        const visible = filterCollapsedProjects(projects, ['a']);
-        expect(visible.map((group) => group.key)).toEqual(['b']);
     });
 });

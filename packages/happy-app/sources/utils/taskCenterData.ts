@@ -173,9 +173,8 @@ export function buildTaskItem(
  * Build the two-section Task Center dataset.
  *
  * - Running tasks are sorted by most recent activity (updatedAt desc).
- * - Everything else is grouped by project path; groups are sorted by path
- *   (the no-path "other" bucket last) and items inside a group are sorted by
- *   most recent activity.
+ * - Everything else is grouped by project path. Groups and their items are
+ *   both sorted by most recent activity.
  */
 export function buildTaskCenterData(
     sessions: readonly Session[],
@@ -231,9 +230,8 @@ export function buildTaskCenterData(
         group.items.sort((a, b) => b.updatedAt - a.updatedAt);
     }
     projects.sort((a, b) => {
-        if (a.key === OTHER_PROJECT_KEY) return 1;
-        if (b.key === OTHER_PROJECT_KEY) return -1;
-        return a.displayPath.localeCompare(b.displayPath);
+        const activityDelta = (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0);
+        return activityDelta || a.displayPath.localeCompare(b.displayPath);
     });
 
     return {
@@ -244,16 +242,4 @@ export function buildTaskCenterData(
         pendingCount: pending.length,
         totalCount: sessions.length,
     };
-}
-
-/** Drop project groups the user collapsed (filtering is done in the view). */
-export function filterCollapsedProjects(
-    projects: readonly TaskProjectGroup[],
-    collapsedKeys: readonly string[],
-): TaskProjectGroup[] {
-    if (collapsedKeys.length === 0) {
-        return projects as TaskProjectGroup[];
-    }
-    const collapsed = new Set(collapsedKeys);
-    return projects.filter((group) => !collapsed.has(group.key));
 }
