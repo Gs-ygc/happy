@@ -249,6 +249,7 @@ export class CodexAppServerClient {
     // before starting a new turn (prevents stale turn/interrupt from aborting the next turn).
     private pendingInterrupt: Promise<void> | null = null;
     private notificationProtocol: 'unknown' | 'legacy' | 'raw' = 'unknown';
+    private startedTurnIds = new Set<string>();
     private completedTurnIds = new Set<string>();
     private rawFileChangesByItemId = new Map<string, LegacyPatchChanges>();
     private rawSubagentActivitySignaturesByItemId = new Map<string, Set<string>>();
@@ -313,7 +314,8 @@ export class CodexAppServerClient {
             return false;
         }
 
-        if (this.notificationProtocol === 'legacy') {
+        const isTurnLifecycle = method === 'turn/started' || method === 'turn/completed';
+        if (this.notificationProtocol === 'legacy' && !isTurnLifecycle) {
             return false;
         }
 
@@ -324,12 +326,42 @@ export class CodexAppServerClient {
         return true;
     }
 
+    private emitTurnStarted(turnId: string | null): void {
+        if (turnId) {
+            this._turnId = turnId;
+        }
+        this.markPendingTurnStarted(turnId);
+
+        if (turnId && this.startedTurnIds.has(turnId)) {
+            return;
+        }
+        if (turnId) {
+            this.startedTurnIds.add(turnId);
+        }
+
+        this.eventHandler?.({
+            type: 'task_started',
+            ...(turnId ? { turn_id: turnId } : {}),
+        });
+    }
+
+    private isStaleTurnCompletion(turnId: string | null, source: string): boolean {
+        if (turnId && this._turnId && turnId !== this._turnId) {
+            logger.debug(`[CodexAppServer] Ignoring stale ${source} for turn ${turnId}; active turn is ${this._turnId}`);
+            return true;
+        }
+        return false;
+    }
+
     private emitRawTurnCompletion(
         turnId: string | null,
         status: string | null,
         error: unknown,
         source: string,
     ): void {
+        if (this.isStaleTurnCompletion(turnId, source)) {
+            return;
+        }
         const aborted = status === 'cancelled' || status === 'canceled' || status === 'aborted' || status === 'interrupted';
 
         this.tryResolvePendingTurn(aborted, turnId, source);
@@ -367,14 +399,7 @@ export class CodexAppServerClient {
 
         if (method === 'turn/started') {
             const turnId = this.extractTurnId(params);
-            if (turnId) {
-                this._turnId = turnId;
-            }
-            this.markPendingTurnStarted(turnId);
-            this.eventHandler?.({
-                type: 'task_started',
-                ...(turnId ? { turn_id: turnId } : {}),
-            });
+            this.emitTurnStarted(turnId);
             return true;
         }
 
@@ -784,6 +809,7 @@ export class CodexAppServerClient {
         this.connected = false;
         this._turnId = null;
         this.notificationProtocol = 'unknown';
+        this.startedTurnIds.clear();
         this.completedTurnIds.clear();
         if (!opts?.preserveThreadState) {
             this._threadId = null;
@@ -1302,6 +1328,7 @@ export class CodexAppServerClient {
         this._threadId = null;
         this._turnId = null;
         this.threadDefaults = null;
+        this.startedTurnIds.clear();
         this.completedTurnIds.clear();
         this.rawFileChangesByItemId.clear();
         this.rawSubagentActivitySignaturesByItemId.clear();
@@ -1601,15 +1628,17 @@ export class CodexAppServerClient {
             this.notificationProtocol = 'legacy';
             const msg = params?.msg;
             if (msg) {
-                // Extract turn_id from task_started events
-                if (msg.type === 'task_started' && msg.turn_id) {
-                    this._turnId = msg.turn_id;
-                }
                 if (msg.type === 'task_started') {
-                    this.markPendingTurnStarted(msg.turn_id ?? msg.turnId ?? null);
+                    this.emitTurnStarted(msg.turn_id ?? msg.turnId ?? null);
+                } else if (msg.type === 'task_complete' || msg.type === 'turn_aborted') {
+                    const turnId = msg.turn_id ?? msg.turnId ?? null;
+                    if (this.isStaleTurnCompletion(turnId, `codex/event/${msg.type}`)) {
+                        return;
+                    }
+                    this.eventHandler?.(msg);
+                } else {
+                    this.eventHandler?.(msg);
                 }
-                // Fire event handler first (so consumer processes the event)
-                this.eventHandler?.(msg);
                 // Then resolve turn completion promise
                 if (msg.type === 'task_complete' || msg.type === 'turn_aborted') {
                     const turnId = msg.turn_id ?? msg.turnId ?? null;

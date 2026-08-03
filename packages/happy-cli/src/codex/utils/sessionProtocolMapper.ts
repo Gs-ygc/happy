@@ -24,6 +24,13 @@ type CodexMapperResult = {
     collabReceiverThreadIdsByCall: Map<string, string[]>;
     collabToolByCall: Map<string, string>;
     envelopes: SessionEnvelope[];
+    syntheticTurnStarted?: boolean;
+};
+
+export type CodexTurnEnvelopeResult = {
+    currentTurnId: string | null;
+    envelopes: SessionEnvelope[];
+    syntheticTurnStarted: boolean;
 };
 
 type LegacyToolLikeMessage = {
@@ -918,7 +925,7 @@ function pickTurnEndStatus(message: Record<string, unknown>, type: unknown): Tur
     return 'completed';
 }
 
-export function mapCodexMcpMessageToSessionEnvelopes(message: Record<string, unknown>, state: CodexTurnState): CodexMapperResult {
+function mapCodexMcpMessageToSessionEnvelopesInternal(message: Record<string, unknown>, state: CodexTurnState): CodexMapperResult {
     const type = message.type;
     const startedSubagents = getStartedSubagents(state);
     const activeSubagents = getActiveSubagents(state);
@@ -928,6 +935,18 @@ export function mapCodexMcpMessageToSessionEnvelopes(message: Record<string, unk
     const collabToolByCall = getCollabToolByCall(state);
 
     if (type === 'task_started') {
+        if (state.currentTurnId) {
+            return {
+                currentTurnId: state.currentTurnId,
+                startedSubagents,
+                activeSubagents,
+                providerSubagentToSessionSubagent,
+                subagentTitles,
+                collabReceiverThreadIdsByCall,
+                collabToolByCall,
+                envelopes: [],
+            };
+        }
         const turnId = createId();
         const turnStart = createEnvelope('agent', { t: 'turn-start' }, { turn: turnId });
         startedSubagents.clear();
@@ -1305,6 +1324,49 @@ export function mapCodexMcpMessageToSessionEnvelopes(message: Record<string, unk
         collabReceiverThreadIdsByCall,
         collabToolByCall,
         envelopes: [],
+    };
+}
+
+function agentEnvelopeRequiresTurn(envelope: SessionEnvelope): boolean {
+    return envelope.role === 'agent'
+        && !envelope.turn
+        && !(envelope.ev.t === 'service' && envelope.ev.text.trim().length === 0 && envelope.usage);
+}
+
+export function ensureCodexTurnForSessionEnvelopes(
+    envelopes: SessionEnvelope[],
+    currentTurnId: string | null,
+): CodexTurnEnvelopeResult {
+    if (currentTurnId || !envelopes.some(agentEnvelopeRequiresTurn)) {
+        return { currentTurnId, envelopes, syntheticTurnStarted: false };
+    }
+
+    const syntheticTurnId = createId();
+    const scopedEnvelopes = envelopes.map((envelope) => (
+        envelope.role === 'agent' && !envelope.turn
+            ? { ...envelope, turn: syntheticTurnId }
+            : envelope
+    ));
+
+    return {
+        currentTurnId: syntheticTurnId,
+        envelopes: [
+            createEnvelope('agent', { t: 'turn-start' }, { turn: syntheticTurnId }),
+            ...scopedEnvelopes,
+        ],
+        syntheticTurnStarted: true,
+    };
+}
+
+export function mapCodexMcpMessageToSessionEnvelopes(
+    message: Record<string, unknown>,
+    state: CodexTurnState,
+): CodexMapperResult {
+    const mapped = mapCodexMcpMessageToSessionEnvelopesInternal(message, state);
+    const scoped = ensureCodexTurnForSessionEnvelopes(mapped.envelopes, mapped.currentTurnId);
+    return {
+        ...mapped,
+        ...scoped,
     };
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createId, isCuid } from '@paralleldrive/cuid2';
 import {
+    ensureCodexTurnForSessionEnvelopes,
     mapCodexMcpMessageToSessionEnvelopes,
     mapCodexProcessorMessageToSessionEnvelopes,
     mapCodexThreadToSessionEnvelopes,
@@ -48,6 +49,46 @@ describe('mapCodexMcpMessageToSessionEnvelopes', () => {
         expect(result.envelopes).toHaveLength(1);
         expect(result.envelopes[0].turn).toBe('turn-1');
         expect(result.envelopes[0].ev).toEqual({ t: 'text', text: 'hello' });
+    });
+
+    it('creates a synthetic turn for unscoped agent text', () => {
+        const result = mapCodexMcpMessageToSessionEnvelopes(
+            { type: 'agent_message', message: 'continued without lifecycle' },
+            { currentTurnId: null }
+        );
+
+        expect(result.currentTurnId).toEqual(expect.any(String));
+        expect(result.envelopes.map((envelope) => envelope.ev.t)).toEqual(['turn-start', 'text']);
+        expect(result.envelopes.every((envelope) => envelope.turn === result.currentTurnId)).toBe(true);
+    });
+
+    it('creates a synthetic turn for unscoped tool events and reuses it', () => {
+        const started = mapCodexMcpMessageToSessionEnvelopes({
+            type: 'exec_command_begin',
+            call_id: 'call-orphan-1',
+            command: 'pwd',
+        }, { currentTurnId: null });
+        const ended = mapCodexMcpMessageToSessionEnvelopes({
+            type: 'exec_command_end',
+            call_id: 'call-orphan-1',
+            output: '/tmp/project\n',
+            exit_code: 0,
+        }, { currentTurnId: started.currentTurnId });
+
+        expect(started.envelopes.map((envelope) => envelope.ev.t)).toEqual(['turn-start', 'tool-call-start']);
+        expect(started.envelopes.every((envelope) => envelope.turn === started.currentTurnId)).toBe(true);
+        expect(ended.envelopes).toHaveLength(1);
+        expect(ended.envelopes[0].turn).toBe(started.currentTurnId);
+    });
+
+    it('does not create a second Happy turn for duplicate task_started events', () => {
+        const result = mapCodexMcpMessageToSessionEnvelopes(
+            { type: 'task_started', turn_id: 'provider-turn-1' },
+            { currentTurnId: 'happy-turn-1' }
+        );
+
+        expect(result.currentTurnId).toBe('happy-turn-1');
+        expect(result.envelopes).toEqual([]);
     });
 
     it('maps streamed agent snapshots onto a stable envelope id', () => {
@@ -534,6 +575,19 @@ describe('mapCodexMcpMessageToSessionEnvelopes', () => {
 });
 
 describe('mapCodexProcessorMessageToSessionEnvelopes', () => {
+    it('scopes processor output with a synthetic turn when lifecycle is missing', () => {
+        const envelopes = mapCodexProcessorMessageToSessionEnvelopes({
+            type: 'reasoning',
+            id: 'reasoning-orphan-1',
+            message: 'continued reasoning',
+        }, { currentTurnId: null });
+        const result = ensureCodexTurnForSessionEnvelopes(envelopes, null);
+
+        expect(result.syntheticTurnStarted).toBe(true);
+        expect(result.envelopes.map((envelope) => envelope.ev.t)).toEqual(['turn-start', 'text']);
+        expect(result.envelopes.every((envelope) => envelope.turn === result.currentTurnId)).toBe(true);
+    });
+
     it('maps reasoning tool lifecycle to start/text/end session events', () => {
         const startEvents = mapCodexProcessorMessageToSessionEnvelopes({
             type: 'tool-call',

@@ -556,13 +556,6 @@ function normalizeSessionEnvelope(
         && envelope.ev.text.trim().length === 0
         && !!envelope.usage;
 
-    // Session protocol requires turn id on all agent-originated envelopes.
-    // Usage-only updates may arrive after turn-end, when the producer no longer has
-    // an active turn to attach to; they update status bars without rendering rows.
-    if (envelope.role === 'agent' && !envelope.turn && !isUsageOnlyServiceEvent) {
-        return null;
-    }
-
     const messageId = envelope.id;
     const messageCreatedAt = envelope.time;
     const parentUUID = envelope.subagent ?? null;

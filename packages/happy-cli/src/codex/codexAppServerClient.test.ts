@@ -1142,6 +1142,83 @@ describe('CodexAppServerClient sandbox integration', () => {
         await client.disconnect();
     });
 
+    it('forwards raw turn lifecycle after legacy notifications selected the protocol', async () => {
+        const proc = createMockProcess();
+        mockSpawn.mockImplementation(() => proc);
+
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient();
+        const events: Array<Record<string, unknown>> = [];
+        client.setEventHandler((event) => events.push(event as Record<string, unknown>));
+
+        await client.connect();
+        pushJsonLine(proc.stdout, {
+            method: 'codex/event',
+            params: { msg: { type: 'agent_message', message: 'legacy transport active' } },
+        });
+        pushJsonLine(proc.stdout, {
+            method: 'turn/started',
+            params: {
+                threadId: 'thread-mixed-1',
+                turn: { id: 'turn-mixed-1', items: [], status: 'inProgress', error: null },
+            },
+        });
+        pushJsonLine(proc.stdout, {
+            method: 'turn/started',
+            params: {
+                threadId: 'thread-mixed-1',
+                turn: { id: 'turn-mixed-1', items: [], status: 'inProgress', error: null },
+            },
+        });
+        pushJsonLine(proc.stdout, {
+            method: 'codex/event',
+            params: { msg: { type: 'task_started', turn_id: 'turn-mixed-1' } },
+        });
+
+        await waitFor(() => events.some((event) => event.type === 'task_started'));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(events.filter((event) => event.type === 'task_started')).toEqual([
+            expect.objectContaining({ type: 'task_started', turn_id: 'turn-mixed-1' }),
+        ]);
+
+        await client.disconnect();
+    });
+
+    it('ignores stale completion from an older provider turn', async () => {
+        const proc = createMockProcess();
+        mockSpawn.mockImplementation(() => proc);
+
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient();
+        const events: Array<Record<string, unknown>> = [];
+        client.setEventHandler((event) => events.push(event as Record<string, unknown>));
+
+        await client.connect();
+        pushJsonLine(proc.stdout, {
+            method: 'turn/started',
+            params: { turn: { id: 'turn-current', status: 'inProgress' } },
+        });
+        pushJsonLine(proc.stdout, {
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-stale', status: 'completed' } },
+        });
+
+        await waitFor(() => events.some((event) => event.type === 'task_started'));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(events.some((event) => event.type === 'task_complete')).toBe(false);
+
+        pushJsonLine(proc.stdout, {
+            method: 'turn/completed',
+            params: { turn: { id: 'turn-current', status: 'completed' } },
+        });
+        await waitFor(() => events.some((event) => event.type === 'task_complete'));
+        expect(events.filter((event) => event.type === 'task_complete')).toEqual([
+            expect.objectContaining({ turn_id: 'turn-current' }),
+        ]);
+
+        await client.disconnect();
+    });
+
     it('sends goal set and clear requests through app-server', async () => {
         const requests: MockRpcMessage[] = [];
         const proc = createMockProcess({

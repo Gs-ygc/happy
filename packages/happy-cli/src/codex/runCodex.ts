@@ -34,6 +34,7 @@ import { resolveCodexExecutionPolicy, shouldAutoApproveCodexApproval } from './e
 import {
     mapCodexMcpMessageToSessionEnvelopes,
     mapCodexProcessorMessageToSessionEnvelopes,
+    ensureCodexTurnForSessionEnvelopes,
 } from './utils/sessionProtocolMapper';
 import { resumeExistingThread } from './resumeExistingThread';
 import { restartCodexBackend, type RestartCodexBackendResult } from './restartCodexBackend';
@@ -699,14 +700,28 @@ export async function runCodex(opts: {
     // call in claudeRemoteLauncher for the full rationale.
     permissionHandler.reset('Previous CLI process exited before responding');
     reasoningProcessor = new ReasoningProcessor((message) => {
-        const envelopes = mapCodexProcessorMessageToSessionEnvelopes(message, { currentTurnId });
-        for (const envelope of envelopes) {
+        const mapped = ensureCodexTurnForSessionEnvelopes(
+            mapCodexProcessorMessageToSessionEnvelopes(message, { currentTurnId }),
+            currentTurnId,
+        );
+        currentTurnId = mapped.currentTurnId;
+        if (mapped.syntheticTurnStarted) {
+            logger.warn(`[Codex] Recovered unscoped ${message.type} event with a synthetic turn`);
+        }
+        for (const envelope of mapped.envelopes) {
             session.sendSessionProtocolMessage(envelope);
         }
     });
     const diffProcessor = new DiffProcessor((message) => {
-        const envelopes = mapCodexProcessorMessageToSessionEnvelopes(message, { currentTurnId });
-        for (const envelope of envelopes) {
+        const mapped = ensureCodexTurnForSessionEnvelopes(
+            mapCodexProcessorMessageToSessionEnvelopes(message, { currentTurnId }),
+            currentTurnId,
+        );
+        currentTurnId = mapped.currentTurnId;
+        if (mapped.syntheticTurnStarted) {
+            logger.warn(`[Codex] Recovered unscoped ${message.type} event with a synthetic turn`);
+        }
+        for (const envelope of mapped.envelopes) {
             session.sendSessionProtocolMessage(envelope);
         }
     });
@@ -966,6 +981,9 @@ export async function runCodex(opts: {
                 collabReceiverThreadIdsByCall: codexCollabReceiverThreadIdsByCall,
                 collabToolByCall: codexCollabToolByCall,
             });
+            if (mapped.syntheticTurnStarted) {
+                logger.warn(`[Codex] Recovered unscoped ${String(msg.type)} event with a synthetic turn`);
+            }
             currentTurnId = mapped.currentTurnId;
             codexStartedSubagents = mapped.startedSubagents;
             codexActiveSubagents = mapped.activeSubagents;

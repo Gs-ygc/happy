@@ -2018,7 +2018,7 @@ describe('Zod Transform - WOLOG Content Normalization', () => {
             expect(normalized).toBeNull();
         });
 
-        it('returns null for agent session events without turn', () => {
+        it('recovers historical agent text events without turn', () => {
             const normalized = normalizeRawMessage('db-9', null, 1, {
                 ...base,
                 content: {
@@ -2032,7 +2032,59 @@ describe('Zod Transform - WOLOG Content Normalization', () => {
                 }
             });
 
-            expect(normalized).toBeNull();
+            expect(normalized).toBeTruthy();
+            expect(normalized?.role).toBe('agent');
+            if (normalized?.role === 'agent') {
+                expect(normalized.content[0]).toMatchObject({
+                    type: 'text',
+                    text: 'missing turn'
+                });
+            }
+        });
+
+        it('recovers historical tool lifecycle events without turn', () => {
+            const start = normalizeRawMessage('db-orphan-tool-start', null, 1, {
+                ...base,
+                content: {
+                    type: 'session',
+                    data: {
+                        id: 'env-orphan-tool-start',
+                        time: 1,
+                        role: 'agent',
+                        ev: {
+                            t: 'tool-call-start',
+                            call: 'call-orphan-1',
+                            name: 'CodexBash',
+                            title: 'Run `pwd`',
+                            description: 'Run command',
+                            args: { command: 'pwd' }
+                        }
+                    }
+                }
+            });
+            const end = normalizeRawMessage('db-orphan-tool-end', null, 2, {
+                ...base,
+                content: {
+                    type: 'session',
+                    data: {
+                        id: 'env-orphan-tool-end',
+                        time: 2,
+                        role: 'agent',
+                        ev: {
+                            t: 'tool-call-end',
+                            call: 'call-orphan-1',
+                            result: '/tmp/project\n'
+                        }
+                    }
+                }
+            });
+
+            expect(start?.role).toBe('agent');
+            expect(end?.role).toBe('agent');
+            if (start?.role === 'agent' && end?.role === 'agent') {
+                expect(start.content[0]).toMatchObject({ type: 'tool-call', id: 'call-orphan-1' });
+                expect(end.content[0]).toMatchObject({ type: 'tool-result', tool_use_id: 'call-orphan-1' });
+            }
         });
 
         it('returns null for turn-end session events without status', () => {
