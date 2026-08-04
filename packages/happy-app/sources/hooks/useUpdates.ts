@@ -2,11 +2,7 @@ import { useEffect, useState } from 'react';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import * as Updates from 'expo-updates';
 import { trackOtaUpdateAvailable, trackOtaUpdateApplied } from '@/track';
-
-type PendingOtaUpdate = {
-    ota_version?: string;
-    ota_runtime_version?: string;
-};
+import { checkForOtaUpdateIfEnabled, type PendingOtaUpdate } from '@/utils/otaUpdates';
 
 export function useUpdates() {
     const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -14,6 +10,10 @@ export function useUpdates() {
     const [pendingUpdate, setPendingUpdate] = useState<PendingOtaUpdate | null>(null);
 
     useEffect(() => {
+        if (!Updates.isEnabled) {
+            return;
+        }
+
         // Check for updates when app becomes active
         const subscription = AppState.addEventListener('change', handleAppStateChange);
 
@@ -32,7 +32,7 @@ export function useUpdates() {
     };
 
     const checkForUpdates = async () => {
-        if (__DEV__) {
+        if (!Updates.isEnabled || __DEV__) {
             // Don't check for updates in development
             return;
         }
@@ -44,13 +44,12 @@ export function useUpdates() {
         setIsChecking(true);
 
         try {
-            const update = await Updates.checkForUpdateAsync();
-            if (update.isAvailable) {
-                const pendingUpdate = {
-                    ota_version: update.manifest.id,
-                    ota_runtime_version: 'runtimeVersion' in update.manifest ? update.manifest.runtimeVersion : undefined,
-                };
-                await Updates.fetchUpdateAsync();
+            const pendingUpdate = await checkForOtaUpdateIfEnabled(
+                Updates.isEnabled,
+                Updates.checkForUpdateAsync,
+                Updates.fetchUpdateAsync,
+            );
+            if (pendingUpdate) {
                 trackOtaUpdateAvailable(pendingUpdate);
                 setPendingUpdate(pendingUpdate);
                 setUpdateAvailable(true);

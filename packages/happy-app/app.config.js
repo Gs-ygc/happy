@@ -90,7 +90,7 @@ export default {
             associatedDomains: variant === 'production' ? ["applinks:app.happy.engineering"] : []
         },
         android: {
-            versionCode: 162,
+            versionCode: 163,
             adaptiveIcon: {
                 foregroundImage: "./sources/assets/images/icon-adaptive.png",
                 monochromeImage: "./sources/assets/images/icon-monochrome.png",
@@ -208,10 +208,8 @@ export default {
             ]
         ],
         updates: {
-            url: "https://u.expo.dev/4558dd3d-cd5a-47cd-bad9-e591a241cc06",
-            requestHeaders: {
-                "expo-channel-name": "production"
-            }
+            enabled: false,
+            checkAutomatically: "NEVER",
         },
         experiments: {
             typedRoutes: true
