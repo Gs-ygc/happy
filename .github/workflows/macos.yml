@@ -1,0 +1,160 @@
+name: Build macOS DMGs
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub Release tag (blank uses the latest native-* release)
+        required: false
+        type: string
+      upload_to_release:
+        description: Upload the DMG to a GitHub Release
+        required: true
+        default: true
+        type: boolean
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/macos.yml'
+      - 'packages/happy-app/src-tauri/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-dmg-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'native-')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            arch: Apple-Silicon
+            runner_arch: arm64
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            arch: Intel
+            runner_arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: packages/happy-app/src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify runner architecture
+        env:
+          EXPECTED_ARCH: ${{ matrix.runner_arch }}
+        run: test "$(uname -m)" = "$EXPECTED_ARCH"
+
+      - name: Build ad-hoc signed DMG
+        working-directory: packages/happy-app
+        env:
+          APP_ENV: production
+          APPLE_SIGNING_IDENTITY: '-'
+          BUILD_TARGET: ${{ matrix.target }}
+        run: pnpm exec tauri build --target "$BUILD_TARGET" --bundles dmg
+
+      - name: Stage installer
+        id: installer
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
+          RELEASE_EVENT_TAG: ${{ github.event.release.tag_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+          BUILD_TARGET: ${{ matrix.target }}
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmg_files=(packages/happy-app/src-tauri/target/"$BUILD_TARGET"/release/bundle/dmg/*.dmg)
+          if [[ ${#dmg_files[@]} -ne 1 ]]; then
+            echo "Expected exactly one DMG, found ${#dmg_files[@]}" >&2
+            exit 1
+          fi
+
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            build_label="$RELEASE_EVENT_TAG"
+          elif [[ -n "$RELEASE_TAG_INPUT" ]]; then
+            build_label="$RELEASE_TAG_INPUT"
+          else
+            build_label="run-$RUN_NUMBER"
+          fi
+          safe_label=$(printf '%s' "$build_label" | tr -cs 'A-Za-z0-9._-' '-')
+
+          mkdir -p artifacts
+          installer="artifacts/Happy-${safe_label}-macOS-${BUILD_ARCH}.dmg"
+          cp "${dmg_files[0]}" "$installer"
+          installer_name=$(basename "$installer")
+          (cd artifacts && shasum -a 256 "$installer_name" > "${installer_name}.sha256")
+          echo "path=$installer" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Happy-macOS-${{ matrix.arch }}-${{ github.run_number }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Resolve target release
+        id: release
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+          RELEASE_EVENT_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$RELEASE_EVENT_TAG" ]]; then
+            tag="$RELEASE_EVENT_TAG"
+          elif [[ -n "$REQUESTED_TAG" ]]; then
+            tag="$REQUESTED_TAG"
+          else
+            tag=$(gh release list --limit 100 --json tagName,publishedAt,isDraft --jq \
+              'map(select((.isDraft | not) and (.tagName | startswith("native-")))) | sort_by(.publishedAt) | reverse | .[0].tagName')
+          fi
+          if [[ -z "$tag" ]]; then
+            echo 'No native-* GitHub Release was found' >&2
+            exit 1
+          fi
+          gh release view "$tag" >/dev/null
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Upload installer to GitHub Release
+        if: steps.release.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          INSTALLER_PATH: ${{ steps.installer.outputs.path }}
+        run: gh release upload "$RELEASE_TAG" "$INSTALLER_PATH" "${INSTALLER_PATH}.sha256" --clobber
