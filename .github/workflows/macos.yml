@@ -17,7 +17,6 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/macos.yml'
       - 'packages/happy-app/src-tauri/**'
 
 permissions:
@@ -46,8 +45,43 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      - name: Resolve build source
+        id: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+          RELEASE_EVENT_TAG: ${{ github.event.release.tag_name }}
+          UPLOAD_TO_RELEASE: ${{ inputs.upload_to_release }}
+        run: |
+          set -euo pipefail
+          source_ref="$GITHUB_SHA"
+          release_tag=''
+
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            source_ref="$RELEASE_EVENT_TAG"
+            release_tag="$RELEASE_EVENT_TAG"
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$REQUESTED_TAG" ]]; then
+            source_ref="$REQUESTED_TAG"
+            release_tag="$REQUESTED_TAG"
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$UPLOAD_TO_RELEASE" == "true" ]]; then
+            release_tag=$(gh release list --limit 100 --json tagName,publishedAt,isDraft --jq \
+              'map(select((.isDraft | not) and (.tagName | startswith("native-")))) | sort_by(.publishedAt) | reverse | .[0].tagName')
+            source_ref="$release_tag"
+          fi
+
+          if [[ -n "$release_tag" ]]; then
+            gh release view "$release_tag" >/dev/null
+          fi
+          echo "ref=$source_ref" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.source.outputs.ref }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
@@ -88,9 +122,7 @@ jobs:
         id: installer
         shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
-          RELEASE_EVENT_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
           RUN_NUMBER: ${{ github.run_number }}
           BUILD_TARGET: ${{ matrix.target }}
           BUILD_ARCH: ${{ matrix.arch }}
@@ -103,10 +135,8 @@ jobs:
             exit 1
           fi
 
-          if [[ "$EVENT_NAME" == "release" ]]; then
-            build_label="$RELEASE_EVENT_TAG"
-          elif [[ -n "$RELEASE_TAG_INPUT" ]]; then
-            build_label="$RELEASE_TAG_INPUT"
+          if [[ -n "$RELEASE_TAG" ]]; then
+            build_label="$RELEASE_TAG"
           else
             build_label="run-$RUN_NUMBER"
           fi
@@ -127,34 +157,10 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Resolve target release
-        id: release
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REQUESTED_TAG: ${{ inputs.release_tag }}
-          RELEASE_EVENT_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          set -euo pipefail
-          if [[ -n "$RELEASE_EVENT_TAG" ]]; then
-            tag="$RELEASE_EVENT_TAG"
-          elif [[ -n "$REQUESTED_TAG" ]]; then
-            tag="$REQUESTED_TAG"
-          else
-            tag=$(gh release list --limit 100 --json tagName,publishedAt,isDraft --jq \
-              'map(select((.isDraft | not) and (.tagName | startswith("native-")))) | sort_by(.publishedAt) | reverse | .[0].tagName')
-          fi
-          if [[ -z "$tag" ]]; then
-            echo 'No native-* GitHub Release was found' >&2
-            exit 1
-          fi
-          gh release view "$tag" >/dev/null
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
       - name: Upload installer to GitHub Release
-        if: steps.release.outputs.tag != ''
+        if: steps.source.outputs.release_tag != '' && (github.event_name == 'release' || inputs.upload_to_release)
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
           INSTALLER_PATH: ${{ steps.installer.outputs.path }}
         run: gh release upload "$RELEASE_TAG" "$INSTALLER_PATH" "${INSTALLER_PATH}.sha256" --clobber
