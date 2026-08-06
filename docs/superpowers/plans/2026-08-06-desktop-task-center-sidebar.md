@@ -99,4 +99,3 @@ Use the repository `AGENTS.md` tmux Gradle workflow, verify package/version/sign
 - [ ] **Step 4: Publish artifacts**
 
 Create the matching GitHub release, upload the APK and exported web archive, and verify release asset URLs and digests.
-

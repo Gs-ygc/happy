@@ -27,4 +27,3 @@ no Task Center entry on larger screens.
 - Run the Happy App tests and TypeScript check.
 - Export the web app and verify the large-screen sidebar in a browser.
 - Build the Android APK locally and publish both requested user-facing artifacts.
-
