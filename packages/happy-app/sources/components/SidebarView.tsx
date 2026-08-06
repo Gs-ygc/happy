@@ -6,10 +6,13 @@ import { useHeaderHeight } from '@/utils/responsive';
 import { VoiceAssistantStatusBar } from './VoiceAssistantStatusBar';
 import { useRealtimeStatus } from '@/sync/storage';
 import { MainView } from './MainView';
+import { TaskCenterView } from './TaskCenterView';
 import { StyleSheet } from 'react-native-unistyles';
 import { t } from '@/text';
 import { Ionicons } from '@expo/vector-icons';
 import { Typography } from '@/constants/Typography';
+import { useAllSessions, useUnreadSessionIds } from '@/sync/storage';
+import { formatSidebarUnreadCount, SIDEBAR_PANELS, type SidebarPanel } from '@/utils/sidebarPanel';
 
 const stylesheet = StyleSheet.create((theme) => ({
     container: {
@@ -57,6 +60,55 @@ const stylesheet = StyleSheet.create((theme) => ({
         color: theme.colors.text,
         ...Typography.default(),
     },
+    panelSwitcher: {
+        flexDirection: 'row',
+        marginHorizontal: 16,
+        marginTop: 8,
+        marginBottom: 8,
+        padding: 3,
+        borderRadius: 10,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.divider,
+        backgroundColor: theme.colors.surface,
+        gap: 3,
+    },
+    panelOption: {
+        flex: 1,
+        minWidth: 0,
+        minHeight: 34,
+        borderRadius: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        paddingHorizontal: 8,
+    },
+    panelOptionSelected: {
+        backgroundColor: theme.colors.surfaceHigh,
+    },
+    panelOptionText: {
+        fontSize: 13,
+        color: theme.colors.textSecondary,
+        ...Typography.default(),
+    },
+    panelOptionTextSelected: {
+        color: theme.colors.text,
+        ...Typography.default('semiBold'),
+    },
+    panelBadge: {
+        minWidth: 17,
+        height: 17,
+        paddingHorizontal: 4,
+        borderRadius: 9,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: theme.colors.status.error,
+    },
+    panelBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 10,
+        ...Typography.default('semiBold'),
+    },
 }));
 
 export const SidebarView = React.memo(() => {
@@ -65,6 +117,18 @@ export const SidebarView = React.memo(() => {
     const router = useRouter();
     const headerHeight = useHeaderHeight();
     const realtimeStatus = useRealtimeStatus();
+    const sessions = useAllSessions();
+    const unreadSessionIds = useUnreadSessionIds();
+    const [activePanel, setActivePanel] = React.useState<SidebarPanel>('sessions');
+
+    const unreadCount = React.useMemo(
+        () => sessions.reduce(
+            (count, session) => count + (unreadSessionIds.has(session.id) ? 1 : 0),
+            0,
+        ),
+        [sessions, unreadSessionIds],
+    );
+    const unreadBadge = formatSidebarUnreadCount(unreadCount);
 
     const handleNewSession = React.useCallback(() => {
         router.navigate('/new');
@@ -88,8 +152,46 @@ export const SidebarView = React.memo(() => {
                 <VoiceAssistantStatusBar variant="sidebar" />
             )}
 
-            {/* Sessions list */}
-            <MainView variant="sidebar" />
+            <View
+                style={styles.panelSwitcher}
+                accessibilityRole="tablist"
+            >
+                {SIDEBAR_PANELS.map((panel) => {
+                    const selected = activePanel === panel.key;
+                    const label = panel.key === 'tasks' ? t('tabs.tasks') : t('tabs.sessions');
+                    return (
+                        <Pressable
+                            key={panel.key}
+                            onPress={() => setActivePanel(panel.key)}
+                            accessibilityRole="tab"
+                            accessibilityLabel={label}
+                            accessibilityState={{ selected }}
+                            style={({ pressed }) => [
+                                styles.panelOption,
+                                selected && styles.panelOptionSelected,
+                                pressed && { opacity: 0.7 },
+                            ]}
+                        >
+                            <Ionicons
+                                name={panel.icon}
+                                size={16}
+                                color={selected ? stylesheet.panelOptionTextSelected.color : stylesheet.panelOptionText.color}
+                            />
+                            <Text style={[styles.panelOptionText, selected && styles.panelOptionTextSelected]} numberOfLines={1}>
+                                {label}
+                            </Text>
+                            {panel.key === 'tasks' && unreadBadge ? (
+                                <View style={styles.panelBadge}>
+                                    <Text style={styles.panelBadgeText}>{unreadBadge}</Text>
+                                </View>
+                            ) : null}
+                        </Pressable>
+                    );
+                })}
+            </View>
+
+            {/* Keep both panels in the same sidebar slot so the main route remains untouched. */}
+            {activePanel === 'tasks' ? <TaskCenterView /> : <MainView variant="sidebar" />}
 
             {/* Settings at bottom */}
             <Pressable
