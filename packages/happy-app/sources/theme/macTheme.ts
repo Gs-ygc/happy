@@ -121,7 +121,8 @@ function normalizeId(value: string): string {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
-        .slice(0, 64);
+        .slice(0, 64)
+        .replace(/-+$/g, '');
     return normalized || 'custom-theme';
 }
 
@@ -198,6 +199,12 @@ function relativeLuminance(color: string): number {
     return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
 }
 
+function contrastRatio(first: string, second: string): number {
+    const lighter = Math.max(relativeLuminance(first), relativeLuminance(second));
+    const darker = Math.min(relativeLuminance(first), relativeLuminance(second));
+    return (lighter + 0.05) / (darker + 0.05);
+}
+
 function deriveTokens(baseColor: string, accentColor: string, contrast: number, materialStrength: number, dark: boolean): MacThemeTokens {
     const base = normalizeColor(baseColor, '#808080');
     const accent = normalizeColor(accentColor, '#007aff');
@@ -268,6 +275,10 @@ export function sanitizeMacTheme(value: unknown): MacThemeDefinition | null {
             [key]: typeof override === 'string' ? override.trim().toLowerCase() : override,
         });
     }
+    for (const dark of [false, true]) {
+        const resolved = { ...deriveTokens(rawGenerator.baseColor.trim(), rawGenerator.accentColor.trim(), rawGenerator.contrast, rawGenerator.materialStrength, dark), ...normalizedOverrides };
+        if (contrastRatio(resolved.contentText, resolved.contentBackground) < 4.5) return null;
+    }
     return {
         schemaVersion: 1,
         id: candidate.id,
@@ -294,7 +305,7 @@ export function flattenMacThemeTokens(theme: MacThemeDefinition, dark: boolean):
         'material-tint': resolved.materialTint,
         'surface-border': resolved.surfaceBorder,
         'popover-shadow': resolved.popoverShadow,
-        'material-blur': String(resolved.materialBlur),
+        'material-blur': `${resolved.materialBlur}px`,
         'material-saturation': String(resolved.materialSaturation),
         'accent-color': resolved.accentColor,
     };

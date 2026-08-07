@@ -11,6 +11,46 @@ html, body {
     font-synthesis: none;
 }
 
+/* macOS Tauri surfaces: titlebar, sidebar, and floating overlays only.
+   The runtime writes these variables for the selected local theme. */
+html.happy-mac-theme,
+html.happy-mac-theme body {
+    background: var(--happy-mac-content-background, #f5f5f7);
+    color: var(--happy-mac-content-text, #1d1d1f);
+}
+
+html.happy-mac-theme [data-happy-mac-sidebar="true"],
+html.happy-mac-theme [data-happy-mac-popover="true"] {
+    border-color: var(--happy-mac-surface-border, rgba(0, 0, 0, 0.12));
+    background-color: color-mix(in srgb, var(--happy-mac-material-background, #f6f6f8) 76%, transparent) !important;
+    background-image: linear-gradient(color-mix(in srgb, var(--happy-mac-material-tint, #ffffff) 12%, transparent), color-mix(in srgb, var(--happy-mac-material-tint, #ffffff) 12%, transparent));
+    -webkit-backdrop-filter: blur(var(--happy-mac-material-blur, 24px)) saturate(var(--happy-mac-material-saturation, 1.35));
+    backdrop-filter: blur(var(--happy-mac-material-blur, 24px)) saturate(var(--happy-mac-material-saturation, 1.35));
+}
+
+html.happy-mac-theme [data-happy-mac-sidebar="true"] {
+    border-right: 1px solid var(--happy-mac-surface-border, rgba(0, 0, 0, 0.12));
+}
+
+html.happy-mac-theme [data-happy-mac-popover="true"] {
+    box-shadow: 0 14px 36px var(--happy-mac-popover-shadow, rgba(0, 0, 0, 0.18));
+}
+
+html.happy-mac-reduced-transparency [data-happy-mac-sidebar="true"],
+html.happy-mac-reduced-transparency [data-happy-mac-popover="true"] {
+    background-color: var(--happy-mac-opaque-surface, #f5f5f7) !important;
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+
+@media (prefers-contrast: more) {
+    html.happy-mac-theme [data-happy-mac-sidebar="true"],
+    html.happy-mac-theme [data-happy-mac-popover="true"] {
+        border-width: 1px;
+    }
+}
+
 html.happy-app-zoomed {
     overflow: hidden;
 }

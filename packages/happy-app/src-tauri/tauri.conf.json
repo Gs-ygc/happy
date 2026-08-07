@@ -19,7 +19,13 @@
         "minHeight": 480,
         "resizable": true,
         "fullscreen": false,
+        "transparent": true,
         "titleBarStyle": "Overlay",
+        "windowEffects": {
+          "effects": ["titlebar"],
+          "state": "followsWindowActiveState",
+          "radius": 12
+        },
         "trafficLightPosition": {
           "x": 22,
           "y": 22

@@ -19,6 +19,10 @@ import {
     type UserMessageBubbleColor,
 } from '@/utils/userMessageBubbleColor';
 import * as React from 'react';
+import { MacThemeEditor } from '@/components/mac-theme/MacThemeEditor';
+import { isMacTauriEnvironment } from '@/theme/macThemeRuntime';
+import { exportMacThemes, importMacThemes } from '@/theme/macThemeStorage';
+import type { MacThemeDefinition } from '@/theme/macTheme';
 
 // Define known avatar styles for this version of the app
 type KnownAvatarStyle = 'pixelated' | 'gradient' | 'brutalist';
@@ -206,9 +210,12 @@ export default function AppearanceSettingsScreen() {
     const [userMessageBubbleColor, setUserMessageBubbleColor] = useSettingMutable('userMessageBubbleColor');
     const [sessionStatusBarDisplay, setSessionStatusBarDisplay] = useSettingMutable('sessionStatusBarDisplay');
     const [themePreference, setThemePreference] = useLocalSettingMutable('themePreference');
+    const [macThemeLibrary, setMacThemeLibrary] = useLocalSettingMutable('macThemeLibrary');
+    const [macThemeId, setMacThemeId] = useLocalSettingMutable('macThemeId');
     const [preferredLanguage] = useSettingMutable('preferredLanguage');
     const [statusPlacementDropdownOpen, setStatusPlacementDropdownOpen] = React.useState(false);
     const [bubbleColorDropdownOpen, setBubbleColorDropdownOpen] = React.useState(false);
+    const macThemeSupported = isMacTauriEnvironment();
     
     // Ensure we have a valid style for display, defaulting to gradient for unknown values
     const displayStyle: KnownAvatarStyle = isKnownAvatarStyle(avatarStyle) ? avatarStyle : 'gradient';
@@ -271,6 +278,62 @@ export default function AppearanceSettingsScreen() {
                     }}
                 />
             </ItemGroup>
+
+            {macThemeSupported && (
+                <ItemGroup title="macOS themes" footer="Themes are stored locally on this Mac. Glass is limited to the titlebar, sidebar, and floating surfaces.">
+                    <MacThemeEditor
+                        library={macThemeLibrary}
+                        selectedId={macThemeId}
+                        onSelect={setMacThemeId}
+                        onSave={(nextTheme) => {
+                            const nextLibrary = macThemeLibrary.some((item) => item.id === nextTheme.id)
+                                ? macThemeLibrary.map((item) => item.id === nextTheme.id ? nextTheme : item)
+                                : [...macThemeLibrary, nextTheme];
+                            setMacThemeLibrary(nextLibrary);
+                            setMacThemeId(nextTheme.id);
+                        }}
+                        onDelete={(id) => {
+                            if (macThemeLibrary.length <= 1) return;
+                            const nextLibrary = macThemeLibrary.filter((item) => item.id !== id);
+                            setMacThemeLibrary(nextLibrary);
+                            if (macThemeId === id) setMacThemeId(nextLibrary[0].id);
+                        }}
+                        onDuplicate={(source) => {
+                            const copy: MacThemeDefinition = {
+                                ...source,
+                                id: `${source.id}-copy-${Date.now().toString(36)}`.slice(0, 64),
+                                name: `${source.name} Copy`,
+                            };
+                            setMacThemeLibrary([...macThemeLibrary, copy]);
+                            setMacThemeId(copy.id);
+                        }}
+                        onImport={() => {
+                            if (typeof document === 'undefined') return;
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.accept = 'application/json,.json';
+                            input.onchange = async () => {
+                                const file = input.files?.[0];
+                                if (!file) return;
+                                const result = importMacThemes(await file.text(), macThemeLibrary);
+                                setMacThemeLibrary(result.library);
+                                setMacThemeId(result.selectedId);
+                            };
+                            input.click();
+                        }}
+                        onExport={() => {
+                            if (typeof document === 'undefined') return;
+                            const blob = new Blob([exportMacThemes(macThemeLibrary)], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const anchor = document.createElement('a');
+                            anchor.href = url;
+                            anchor.download = 'happy-macos-themes.json';
+                            anchor.click();
+                            URL.revokeObjectURL(url);
+                        }}
+                    />
+                </ItemGroup>
+            )}
 
             {/* Language Settings */}
             <ItemGroup title={t('settingsLanguage.title')} footer={t('settingsLanguage.description')}>

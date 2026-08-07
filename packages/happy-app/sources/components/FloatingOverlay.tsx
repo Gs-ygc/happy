@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Platform } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { StyleSheet } from 'react-native-unistyles';
+import { isMacTauri } from '@/utils/isTauri';
 
 const stylesheet = StyleSheet.create((theme, runtime) => ({
     container: {
@@ -35,7 +36,10 @@ export const FloatingOverlay = React.memo((props: FloatingOverlayProps) => {
     } = props;
 
     return (
-        <Animated.View style={[styles.container, { maxHeight }]}>
+        <Animated.View
+            style={[styles.container, { maxHeight }]}
+            {...(isMacTauri() ? { dataSet: { happyMacPopover: 'true' } } : {})}
+        >
             <Animated.ScrollView
                 style={{ maxHeight }}
                 keyboardShouldPersistTaps={keyboardShouldPersistTaps}

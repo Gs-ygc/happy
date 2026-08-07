@@ -8,7 +8,13 @@
         "title": "Happy (preview)",
         "width": 1680,
         "height": 1050,
+        "transparent": true,
         "titleBarStyle": "Overlay",
+        "windowEffects": {
+          "effects": ["titlebar"],
+          "state": "followsWindowActiveState",
+          "radius": 12
+        },
         "trafficLightPosition": {
           "x": 22,
           "y": 22

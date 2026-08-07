@@ -1,4 +1,5 @@
 import * as z from 'zod';
+import { MAC_THEME_PRESETS, createMacTheme, sanitizeMacTheme, type MacThemeDefinition } from '@/theme/macTheme';
 
 //
 // Schema
@@ -11,6 +12,8 @@ export const LocalSettingsSchema = z.object({
     voiceUpsellOverride: z.enum(['control', 'show-paywall-before-first-voice-chat', 'voice-onboarding-and-upsell']).nullable().describe('Developer-only local override for the voice-upsell PostHog flag'),
     commandPaletteEnabled: z.boolean().describe('Enable CMD+K command palette (web only)'),
     themePreference: z.enum(['light', 'dark', 'adaptive']).describe('Theme preference: light, dark, or adaptive (follows system)'),
+    macThemeLibrary: z.array(z.custom<MacThemeDefinition>()).describe('Local macOS theme definitions'),
+    macThemeId: z.string().describe('Selected local macOS theme ID'),
     markdownCopyV2: z.boolean().describe('Replace native paragraph selection with long-press modal for full markdown copy'),
     consoleLoggingEnabled: z.boolean().describe('Enable console output in production builds'),
     verboseLogging: z.boolean().describe('Log all network requests and responses'),
@@ -43,6 +46,8 @@ export const localSettingsDefaults: LocalSettings = {
     voiceUpsellOverride: null,
     commandPaletteEnabled: false,
     themePreference: 'adaptive',
+    macThemeLibrary: [createMacTheme(MAC_THEME_PRESETS['system-glass'])],
+    macThemeId: 'system-glass',
     markdownCopyV2: false,
     consoleLoggingEnabled: false,
     verboseLogging: false,
@@ -65,7 +70,13 @@ export function localSettingsParse(settings: unknown): LocalSettings {
     if (!parsed.success) {
         return { ...localSettingsDefaults };
     }
-    return { ...localSettingsDefaults, ...parsed.data };
+    const parsedMacThemes = Array.isArray(parsed.data.macThemeLibrary)
+        ? parsed.data.macThemeLibrary
+            .map((theme) => sanitizeMacTheme(theme))
+            .filter((theme): theme is MacThemeDefinition => theme !== null)
+        : [];
+    const macThemeLibrary = parsedMacThemes.length > 0 ? parsedMacThemes : localSettingsDefaults.macThemeLibrary;
+    return { ...localSettingsDefaults, ...parsed.data, macThemeLibrary };
 }
 
 //

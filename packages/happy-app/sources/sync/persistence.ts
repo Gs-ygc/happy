@@ -1,6 +1,7 @@
 import { MMKV } from 'react-native-mmkv';
 import { Settings, settingsDefaults, settingsParse, settingsToSyncPayload, SettingsSchema } from './settings';
 import { LocalSettings, localSettingsDefaults, localSettingsParse } from './localSettings';
+import type { MacThemeDefinition } from '@/theme/macTheme';
 import { Purchases, purchasesDefaults, purchasesParse } from './purchases';
 import { Profile, profileDefaults, profileParse } from './profile';
 import type { PermissionModeKey } from '@/components/PermissionModeSelector';
@@ -80,6 +81,19 @@ export function loadLocalSettings(): LocalSettings {
 
 export function saveLocalSettings(settings: LocalSettings) {
     mmkv.set('local-settings', JSON.stringify(settings));
+}
+
+export function loadMacThemeState(): { library: MacThemeDefinition[]; selectedId: string } {
+    const settings = loadLocalSettings();
+    return {
+        library: settings.macThemeLibrary,
+        selectedId: settings.macThemeId,
+    };
+}
+
+export function saveMacThemeState(library: MacThemeDefinition[], selectedId: string): void {
+    const settings = loadLocalSettings();
+    saveLocalSettings({ ...settings, macThemeLibrary: library, macThemeId: selectedId });
 }
 
 export function loadThemePreference(): 'light' | 'dark' | 'adaptive' {

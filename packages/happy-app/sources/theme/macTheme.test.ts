@@ -50,7 +50,21 @@ describe('macOS theme model', () => {
             contrast: 1,
             materialStrength: 0,
         });
-        expect(flattenMacThemeTokens(theme, false)['material-blur']).toBe('0');
+        expect(flattenMacThemeTokens(theme, false)['material-blur']).toBe('0px');
+    });
+
+    it('keeps generated IDs valid when truncation lands on a separator', () => {
+        const theme = createMacTheme({
+            id: `${'a'.repeat(63)}-x`,
+            name: 'Long ID',
+            mode: 'light',
+            baseColor: '#ffffff',
+            accentColor: '#000000',
+            contrast: 0.5,
+            materialStrength: 0.5,
+        });
+        expect(theme.id).toMatch(/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/);
+        expect(sanitizeMacTheme(theme)).not.toBeNull();
     });
 
     it('rejects malformed or unsupported imported themes', () => {
@@ -68,6 +82,19 @@ describe('macOS theme model', () => {
                 materialStrength: 0.5,
             },
             tokenOverrides: { unknownToken: '#fff' },
+        })).toBeNull();
+        expect(sanitizeMacTheme({
+            schemaVersion: 1,
+            id: 'low-contrast',
+            name: 'Low contrast',
+            mode: 'light',
+            generator: {
+                baseColor: '#ffffff',
+                accentColor: '#000000',
+                contrast: 0.5,
+                materialStrength: 0.5,
+            },
+            tokenOverrides: { contentBackground: '#ffffff', contentText: '#ffffff' },
         })).toBeNull();
         expect(sanitizeMacTheme({
             schemaVersion: 1,
@@ -101,11 +128,11 @@ describe('macOS theme model', () => {
 
         expect(flattenMacThemeTokens(theme, false)).toMatchObject({
             'content-text': '#123456',
-            'material-blur': '42',
+            'material-blur': '42px',
         });
         expect(flattenMacThemeTokens(theme, true)).toMatchObject({
             'content-text': '#123456',
-            'material-blur': '42',
+            'material-blur': '42px',
         });
     });
 });

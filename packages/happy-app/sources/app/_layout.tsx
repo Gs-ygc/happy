@@ -29,6 +29,7 @@ import { StatusBarProvider } from '@/components/StatusBarProvider';
 import { initConsoleLogging, setConsoleOutputEnabled } from '@/utils/consoleLogging';
 import { useLocalSetting } from '@/sync/storage';
 import { useUnistyles } from 'react-native-unistyles';
+import { MacThemeProvider } from '@/theme/MacThemeProvider';
 import { AsyncLock } from '@/utils/lock';
 import { getSessionRouteFromNotificationResponse } from '@/utils/notificationRouting';
 import { navigateToSession } from '@/hooks/useNavigateToSession';
@@ -419,7 +420,8 @@ export default function RootLayout() {
     //
 
     let providers = (
-        <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+        <MacThemeProvider>
+          <SafeAreaProvider initialMetrics={initialWindowMetrics}>
             <KeyboardProvider preload={false}>
                 <GestureHandlerRootView style={{ flex: 1 }}>
                     <AuthProvider initialCredentials={initState.credentials}>
@@ -439,7 +441,8 @@ export default function RootLayout() {
                     </AuthProvider>
                 </GestureHandlerRootView>
             </KeyboardProvider>
-        </SafeAreaProvider>
+          </SafeAreaProvider>
+        </MacThemeProvider>
     );
     if (tracking) {
         providers = (

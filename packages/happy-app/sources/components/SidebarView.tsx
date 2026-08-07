@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Typography } from '@/constants/Typography';
 import { useAllSessions, useUnreadSessionIds } from '@/sync/storage';
 import { formatSidebarUnreadCount, SIDEBAR_PANELS, type SidebarPanel } from '@/utils/sidebarPanel';
+import { isMacTauri } from '@/utils/isTauri';
 
 const stylesheet = StyleSheet.create((theme) => ({
     container: {
@@ -135,7 +136,10 @@ export const SidebarView = React.memo(() => {
     }, [router]);
 
     return (
-        <View style={[styles.container, { paddingTop: safeArea.top + headerHeight }]}>
+        <View
+            style={[styles.container, { paddingTop: safeArea.top + headerHeight }]}
+            {...(isMacTauri() ? { dataSet: { happyMacSidebar: 'true' } } : {})}
+        >
             {/* New Session button */}
             <Pressable
                 onPress={handleNewSession}
