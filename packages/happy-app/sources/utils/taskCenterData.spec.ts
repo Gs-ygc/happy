@@ -172,6 +172,39 @@ describe('buildTaskCenterData', () => {
         expect(data.running.map((item) => item.sessionId)).toEqual(['new', 'old']);
     });
 
+    it('keeps thinking and permission sessions ahead of a newer running session', () => {
+        const running = sessionWith({ id: 'run-new', updatedAt: Date.now() });
+        const thinking = sessionWith({ id: 'think-old', updatedAt: Date.now() - 5000, thinking: true });
+        const permission = sessionWith({
+            id: 'perm-old',
+            updatedAt: Date.now() - 6000,
+            agentState: { requests: { req1: { id: 'req1', tool: 'Bash' } } } as any,
+        });
+        const data = buildTaskCenterData([running, thinking, permission], noMachines, []);
+
+        expect(data.running.map((item) => item.sessionId)).toEqual(['think-old', 'perm-old', 'run-new']);
+    });
+
+    it('prioritizes active work state over an active goal on a running session', () => {
+        const thinking = sessionWith({ id: 'think-old', updatedAt: Date.now() - 5000, thinking: true });
+        const goal = sessionWith({
+            id: 'goal-new',
+            updatedAt: Date.now(),
+            agentState: {
+                agentGoalStatus: {
+                    status: 'active',
+                    source: 'claude',
+                    text: 'finish the feature',
+                    observedAt: Date.now(),
+                    sourceSessionId: 'claude-session-1',
+                },
+            } as any,
+        });
+        const data = buildTaskCenterData([goal, thinking], noMachines, []);
+
+        expect(data.running.map((item) => item.sessionId)).toEqual(['think-old', 'goal-new']);
+    });
+
     it('keeps online-but-idle sessions out of running and marks them online', () => {
         const idle = sessionWith({
             id: 'idle-1',

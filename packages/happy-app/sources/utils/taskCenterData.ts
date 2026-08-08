@@ -172,7 +172,8 @@ export function buildTaskItem(
 /**
  * Build the two-section Task Center dataset.
  *
- * - Running tasks are sorted by most recent activity (updatedAt desc).
+ * - Running tasks are sorted by active work state first, then in-progress
+ *   goals, then most recent activity (updatedAt desc).
  * - Everything else is grouped by project path. Groups and their items are
  *   both sorted by most recent activity.
  */
@@ -200,8 +201,12 @@ export function buildTaskCenterData(
         }
     }
 
-    // Sessions with an in-progress goal stay on top, then by recent activity.
+    // Active work state keeps thinking/permission sessions above idle running
+    // sessions, then in-progress goals, then by recent activity.
     running.sort((a, b) => {
+        const aWorking = a.state === 'running' ? 0 : 1;
+        const bWorking = b.state === 'running' ? 0 : 1;
+        if (aWorking !== bWorking) return bWorking - aWorking;
         const aGoal = a.goal?.status === 'active' ? 1 : 0;
         const bGoal = b.goal?.status === 'active' ? 1 : 0;
         if (aGoal !== bGoal) return bGoal - aGoal;

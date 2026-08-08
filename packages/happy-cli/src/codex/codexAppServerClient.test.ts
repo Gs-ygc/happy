@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SandboxConfig } from '@/persistence';
+import { logger } from '@/ui/logger';
 
 const {
     mockExecSync,
@@ -477,6 +478,164 @@ describe('CodexAppServerClient sandbox integration', () => {
             resumedThread: true,
         });
         expect(secondProcessRequests.some((msg) => msg.method === 'thread/resume')).toBe(true);
+
+        await client.disconnect();
+    });
+
+    it('reuses an in-flight interrupt RPC so rapid follow-ups cannot send a stale one', async () => {
+        const requests: MockRpcMessage[] = [];
+        const proc = createMockProcess({
+            onRequest: (msg, stdout) => {
+                requests.push(msg);
+
+                if (msg.method === 'thread/start' && msg.id != null) {
+                    setTimeout(() => {
+                        pushJsonLine(stdout, {
+                            id: msg.id,
+                            result: {
+                                thread: { id: 'thread-coalesce', path: '/tmp/thread-coalesce' },
+                                model: 'gpt-test',
+                                modelProvider: 'openai',
+                                cwd: '/tmp/project',
+                                approvalPolicy: 'never',
+                                sandbox: { type: 'dangerFullAccess' },
+                                reasoningEffort: null,
+                            },
+                        });
+                    }, 0);
+                }
+
+                if (msg.method === 'turn/start' && msg.id != null) {
+                    setTimeout(() => {
+                        pushJsonLine(stdout, { id: msg.id, result: {} });
+                        pushJsonLine(stdout, {
+                            method: 'codex/event',
+                            params: { msg: { type: 'task_started', turn_id: 'turn-coalesce' } },
+                        });
+                    }, 0);
+                }
+
+                if (msg.method === 'turn/interrupt' && msg.id != null) {
+                    setTimeout(() => {
+                        pushJsonLine(stdout, { id: msg.id, result: { abortReason: 'interrupted' } });
+                    }, 0);
+                }
+            },
+        });
+        mockSpawn.mockImplementationOnce(() => proc);
+
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient();
+
+        await client.connect();
+        await client.startThread({
+            model: 'gpt-test',
+            cwd: '/tmp/project',
+            approvalPolicy: 'never',
+            sandbox: 'danger-full-access',
+        });
+        const pendingTurn = client.sendTurnAndWait('first', { turnTimeoutMs: 5000 });
+        await waitFor(() => client.turnId === 'turn-coalesce');
+
+        const firstInterrupt = client.interruptTurn({ timeoutMs: 5000 });
+        const secondInterrupt = client.interruptTurn({ timeoutMs: 5000 });
+
+        expect(requests.filter((msg) => msg.method === 'turn/interrupt')).toHaveLength(1);
+        await Promise.all([firstInterrupt, secondInterrupt]);
+        pushJsonLine(proc.stdout, {
+            method: 'codex/event',
+            params: { msg: { type: 'task_complete', turn_id: 'turn-coalesce' } },
+        });
+        await expect(pendingTurn).resolves.toEqual({ aborted: false });
+
+        await client.disconnect();
+    });
+
+    it('coalesces concurrent forced interrupts into one abort operation', async () => {
+        const requests: MockRpcMessage[] = [];
+        const resolveInterrupt = { current: null as (() => void) | null };
+        const proc = createMockProcess({
+            onRequest: (msg, stdout) => {
+                requests.push(msg);
+
+                if (msg.method === 'thread/start' && msg.id != null) {
+                    setTimeout(() => {
+                        pushJsonLine(stdout, {
+                            id: msg.id,
+                            result: {
+                                thread: { id: 'thread-force-coalesce', path: '/tmp/thread-force-coalesce' },
+                                model: 'gpt-test',
+                                modelProvider: 'openai',
+                                cwd: '/tmp/project',
+                                approvalPolicy: 'never',
+                                sandbox: { type: 'dangerFullAccess' },
+                                reasoningEffort: null,
+                            },
+                        });
+                    }, 0);
+                }
+
+                if (msg.method === 'turn/start' && msg.id != null) {
+                    setTimeout(() => {
+                        pushJsonLine(stdout, { id: msg.id, result: {} });
+                        pushJsonLine(stdout, {
+                            method: 'codex/event',
+                            params: { msg: { type: 'task_started', turn_id: 'turn-force-coalesce' } },
+                        });
+                    }, 0);
+                }
+
+                if (msg.method === 'turn/interrupt' && msg.id != null) {
+                    resolveInterrupt.current = () => {
+                        pushJsonLine(stdout, { id: msg.id, result: { abortReason: 'interrupted' } });
+                    };
+                }
+            },
+        });
+        mockSpawn.mockImplementationOnce(() => proc);
+
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient();
+
+        await client.connect();
+        await client.startThread({
+            model: 'gpt-test',
+            cwd: '/tmp/project',
+            approvalPolicy: 'never',
+            sandbox: 'danger-full-access',
+        });
+        const pendingTurn = client.sendTurnAndWait('first', { turnTimeoutMs: 5000 });
+        await waitFor(() => client.turnId === 'turn-force-coalesce');
+
+        const firstAbort = client.abortTurnWithFallback({
+            gracePeriodMs: 100,
+            forceRestartOnTimeout: false,
+        });
+        const secondAbort = client.abortTurnWithFallback({
+            gracePeriodMs: 100,
+            forceRestartOnTimeout: false,
+        });
+
+        expect(requests.filter((msg) => msg.method === 'turn/interrupt')).toHaveLength(1);
+        resolveInterrupt.current?.();
+        pushJsonLine(proc.stdout, {
+            method: 'codex/event',
+            params: { msg: { type: 'turn_aborted', turn_id: 'turn-force-coalesce', reason: 'interrupted' } },
+        });
+
+        await expect(pendingTurn).resolves.toEqual({ aborted: true });
+        await expect(firstAbort).resolves.toEqual({
+            hadActiveTurn: true,
+            aborted: true,
+            forcedRestart: false,
+            resumedThread: false,
+        });
+        await expect(secondAbort).resolves.toEqual({
+            hadActiveTurn: true,
+            aborted: true,
+            forcedRestart: false,
+            resumedThread: false,
+        });
 
         await client.disconnect();
     });
@@ -1217,6 +1376,107 @@ describe('CodexAppServerClient sandbox integration', () => {
         ]);
 
         await client.disconnect();
+    });
+
+    it('logs raw lifecycle params and full delta payload when DEBUG is enabled', async () => {
+        const originalDebug = process.env.DEBUG;
+        process.env.DEBUG = '1';
+        const proc = createMockProcess();
+        mockSpawn.mockImplementation(() => proc);
+
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient();
+        try {
+            await client.connect();
+            pushJsonLine(proc.stdout, {
+                method: 'turn/started',
+                params: {
+                    threadId: 'thread-log-1',
+                    turn: { id: 'turn-log-1', items: [], status: 'inProgress', error: null },
+                },
+            });
+            pushJsonLine(proc.stdout, {
+                method: 'item/agentMessage/delta',
+                params: {
+                    threadId: 'thread-log-1',
+                    turnId: 'turn-log-1',
+                    itemId: 'msg-log-1',
+                    delta: 'Hel',
+                },
+            });
+            pushJsonLine(proc.stdout, {
+                method: 'turn/completed',
+                params: {
+                    threadId: 'thread-log-1',
+                    turn: { id: 'turn-log-1', items: [], status: 'completed', error: null },
+                },
+            });
+
+            await waitFor(() => vi.mocked(logger.debug).mock.calls.some(
+                (call) => String(call[0]).includes('Raw notification: turn/started'),
+            ));
+            await waitFor(() => vi.mocked(logger.debug).mock.calls.some(
+                (call) => String(call[0]).includes('Raw notification: item/agentMessage/delta'),
+            ));
+            await waitFor(() => vi.mocked(logger.debug).mock.calls.some(
+                (call) => String(call[0]).includes('Raw notification: turn/completed'),
+            ));
+
+            const debugOutput = vi.mocked(logger.debug).mock.calls
+                .map((call) => call.map(String).join(' '))
+                .join('\n');
+            expect(debugOutput).toContain('"id":"turn-log-1"');
+            expect(debugOutput).toContain('"delta":"Hel"');
+            expect(debugOutput).toContain('"itemId":"msg-log-1"');
+            expect(debugOutput).toContain('"status":"completed"');
+        } finally {
+            if (originalDebug === undefined) {
+                delete process.env.DEBUG;
+            } else {
+                process.env.DEBUG = originalDebug;
+            }
+            await client.disconnect();
+        }
+    });
+
+    it('logs compact delta metadata when DEBUG is disabled', async () => {
+        const originalDebug = process.env.DEBUG;
+        delete process.env.DEBUG;
+        const proc = createMockProcess();
+        mockSpawn.mockImplementation(() => proc);
+
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient();
+        try {
+            await client.connect();
+            pushJsonLine(proc.stdout, {
+                method: 'item/agentMessage/delta',
+                params: {
+                    threadId: 'thread-log-2',
+                    turnId: 'turn-log-2',
+                    itemId: 'msg-log-2',
+                    delta: 'Hey',
+                },
+            });
+
+            await waitFor(() => vi.mocked(logger.debug).mock.calls.some(
+                (call) => String(call[0]).includes('Raw notification: item/agentMessage/delta'),
+            ));
+
+            const debugOutput = vi.mocked(logger.debug).mock.calls
+                .map((call) => call.map(String).join(' '))
+                .join('\n');
+            expect(debugOutput).toContain('item_id=msg-log-2');
+            expect(debugOutput).toContain('delta_length=3');
+            expect(debugOutput).not.toContain('"delta":"Hey"');
+        } finally {
+            if (originalDebug === undefined) {
+                delete process.env.DEBUG;
+            } else {
+                process.env.DEBUG = originalDebug;
+            }
+            await client.disconnect();
+        }
     });
 
     it('sends goal set and clear requests through app-server', async () => {

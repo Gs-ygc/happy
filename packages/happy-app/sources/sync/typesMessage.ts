@@ -26,6 +26,11 @@ export type UserTextMessage = {
     kind: 'user-text';
     id: string;
     localId: string | null;
+    /**
+     * Server-side SessionMessage id that produced this rendered message.
+     * Local optimistic messages use the local id until the server confirms.
+     */
+    sourceMessageId?: string;
     createdAt: number;
     text: string;
     displayText?: string; // Optional text to display in UI instead of actual text
@@ -46,6 +51,7 @@ export type UserTextMessage = {
 export type ModeSwitchMessage = {
     kind: 'agent-event';
     id: string;
+    sourceMessageId?: string;
     createdAt: number;
     event: AgentEvent;
     meta?: MessageMeta;
@@ -55,6 +61,7 @@ export type AgentTextMessage = {
     kind: 'agent-text';
     id: string;
     localId: string | null;
+    sourceMessageId?: string;
     createdAt: number;
     text: string;
     isThinking?: boolean;
@@ -65,6 +72,7 @@ export type ToolCallMessage = {
     kind: 'tool-call';
     id: string;
     localId: string | null;
+    sourceMessageId?: string;
     createdAt: number;
     tool: ToolCall;
     children: Message[];

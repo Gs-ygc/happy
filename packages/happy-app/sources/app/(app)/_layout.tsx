@@ -100,6 +100,14 @@ export default function RootLayout() {
                 }}
             />
             <Stack.Screen
+                name="session/search"
+                options={{
+                    headerShown: true,
+                    headerTitle: t('globalSearch.title'),
+                    headerBackTitle: t('common.back'),
+                }}
+            />
+            <Stack.Screen
                 name="session/[id]/file"
                 options={{
                     headerShown: true,

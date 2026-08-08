@@ -37,6 +37,30 @@ describe('interruptTurnForIncomingMessage', () => {
         expect(log).toHaveBeenCalledTimes(1);
     });
 
+    it('forces the active turn through abortTurnWithFallback when available', () => {
+        const client = {
+            turnId: 'turn-1',
+            interruptTurn: vi.fn(),
+            abortTurnWithFallback: vi.fn().mockResolvedValue({
+                hadActiveTurn: true,
+                aborted: true,
+                forcedRestart: false,
+                resumedThread: false,
+            }),
+        };
+        const abortAll = vi.fn();
+        const log = vi.fn();
+
+        expect(interruptTurnForIncomingMessage(client, { abortAll }, log)).toBe(true);
+        expect(abortAll).toHaveBeenCalledTimes(1);
+        expect(client.abortTurnWithFallback).toHaveBeenCalledWith({
+            gracePeriodMs: 3000,
+            forceRestartOnTimeout: true,
+        });
+        expect(client.interruptTurn).not.toHaveBeenCalled();
+        expect(log).toHaveBeenCalledTimes(1);
+    });
+
     it('survives an interrupt rejection without losing the message', async () => {
         const client = {
             turnId: 'turn-1',

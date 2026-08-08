@@ -401,13 +401,18 @@ export async function runCodex(opts: {
         // Match Codex CLI semantics: a message sent while the agent is
         // working interrupts the running turn so it is processed immediately
         // instead of waiting until the current turn completes.
-        interruptTurnForIncomingMessage(client, permissionHandler, (message) => logger.debug(message));
+        const interruptedActiveTurn = interruptTurnForIncomingMessage(
+            client,
+            permissionHandler,
+            (message) => logger.debug(message),
+        );
 
         const enqueueResult = enqueueCodexUserText({
             text: message.content.text,
             mode: enhancedMode,
             queue: messageQueue,
             attachments: attachmentsForThisMessage,
+            isolate: interruptedActiveTurn,
         });
         if (enqueueResult === 'clear') {
             logger.debug('[Codex] /clear command pushed to isolated queue');

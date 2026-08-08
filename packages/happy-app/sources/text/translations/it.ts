@@ -630,6 +630,16 @@ export const it: TranslationStructure = {
         truncated: 'First 200 matches', user: 'You', assistant: 'Agent', jumpFailedTitle: 'Message unavailable', jumpFailedMessage: 'The message could not be loaded. Try searching again.',
     },
 
+    globalSearch: {
+        title: 'Search all conversations',
+        open: 'Search all conversations',
+        placeholder: 'Search all conversations',
+        searching: ({ sessions, messages, matches }: { sessions: number; messages: number; matches: number }) =>
+            `Scanned ${sessions} sessions · ${messages} messages · ${matches} matches`,
+        resultCount: ({ count }: { count: number }) => `${count} matches`,
+        noResults: 'No matching messages',
+    },
+
     files: {
         changes: 'Modifiche',
         searchPlaceholder: 'Cerca file...',

@@ -10,6 +10,10 @@
 export type ActiveTurnInterruptClient = {
     turnId: string | null;
     interruptTurn(opts?: { timeoutMs?: number }): Promise<void>;
+    abortTurnWithFallback?(opts?: {
+        gracePeriodMs?: number;
+        forceRestartOnTimeout?: boolean;
+    }): Promise<unknown>;
 };
 
 export type PendingPermissionAborter = {
@@ -17,13 +21,15 @@ export type PendingPermissionAborter = {
 };
 
 /**
- * Best-effort interrupt of the running Codex turn for an incoming message.
+ * Interrupt the running Codex turn for an incoming message.
  *
  * Resolves pending permission requests first so the interrupted turn does
- * not stay stuck on an approval that will be superseded. The interrupt is
- * fire-and-forget: sendTurnAndWait already waits for in-flight interrupts
- * before starting the next turn, and a slow/failed interrupt only delays
- * the message instead of losing it.
+ * not stay stuck on an approval that will be superseded. When the client
+ * supports it, the interrupt uses the same forced fallback as Stop Execution:
+ * if Codex does not settle within the grace period, the app-server is
+ * restarted and the thread resumed. The call is fire-and-forget; the message
+ * is already being enqueued and sendTurnAndWait waits for in-flight work
+ * before starting the next turn.
  *
  * @returns true when a turn was active and an interrupt was triggered.
  */
@@ -38,9 +44,19 @@ export function interruptTurnForIncomingMessage(
 
     permissionHandler?.abortAll();
     log?.('[Codex] User message during active turn — interrupting current turn');
-    void client.interruptTurn({ timeoutMs: 2000 }).catch(() => {
-        // The real client never rejects (it swallows RPC errors), but guard
-        // anyway so a hostile/mock client cannot break the message queue.
-    });
+    if (client.abortTurnWithFallback) {
+        void client.abortTurnWithFallback({
+            gracePeriodMs: 3000,
+            forceRestartOnTimeout: true,
+        }).catch(() => {
+            // The real client never rejects, but guard anyway so a hostile/mock
+            // client cannot break the message queue.
+        });
+    } else {
+        void client.interruptTurn({ timeoutMs: 2000 }).catch(() => {
+            // The real client never rejects (it swallows RPC errors), but guard
+            // anyway so a hostile/mock client cannot break the message queue.
+        });
+    }
     return true;
 }

@@ -642,6 +642,16 @@ export const zhHant: TranslationStructure = {
         jumpFailedMessage: '無法載入這則訊息，請重新搜尋。',
     },
 
+    globalSearch: {
+        title: '搜尋全部會話',
+        open: '搜尋全部會話',
+        placeholder: '搜尋全部會話',
+        searching: ({ sessions, messages, matches }: { sessions: number; messages: number; matches: number }) =>
+            `已掃描 ${sessions} 個會話 · ${messages} 則訊息 · ${matches} 個結果`,
+        resultCount: ({ count }: { count: number }) => `${count} 個結果`,
+        noResults: '沒有相符的訊息',
+    },
+
     files: {
         changes: '變更',
         searchPlaceholder: '搜尋檔案...',

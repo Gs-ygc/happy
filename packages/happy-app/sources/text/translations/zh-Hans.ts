@@ -643,6 +643,16 @@ export const zhHans: TranslationStructure = {
         jumpFailedMessage: '无法加载这条消息，请重新搜索。',
     },
 
+    globalSearch: {
+        title: '搜索全部会话',
+        open: '搜索全部会话',
+        placeholder: '搜索全部会话',
+        searching: ({ sessions, messages, matches }: { sessions: number; messages: number; matches: number }) =>
+            `已扫描 ${sessions} 个会话 · ${messages} 条消息 · ${matches} 个结果`,
+        resultCount: ({ count }: { count: number }) => `${count} 个结果`,
+        noResults: '没有匹配的消息',
+    },
+
     files: {
         changes: '更改',
         searchPlaceholder: '搜索文件...',

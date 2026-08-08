@@ -8,6 +8,7 @@ describe('enqueueCodexUserText', () => {
         const queue = {
             push: vi.fn(),
             pushIsolateAndClear: vi.fn(),
+            pushIsolated: vi.fn(),
         };
 
         const result = enqueueCodexUserText({
@@ -31,6 +32,7 @@ describe('enqueueCodexUserText', () => {
         const queue = {
             push: vi.fn(),
             pushIsolateAndClear: vi.fn(),
+            pushIsolated: vi.fn(),
         };
 
         const result = enqueueCodexUserText({
@@ -43,6 +45,7 @@ describe('enqueueCodexUserText', () => {
         expect(result).toBe('queued');
         expect(queue.push).toHaveBeenCalledWith('inspect this image', mode, attachments);
         expect(queue.pushIsolateAndClear).not.toHaveBeenCalled();
+        expect(queue.pushIsolated).not.toHaveBeenCalled();
     });
 
     it('passes attachments to isolated clear messages', () => {
@@ -55,6 +58,7 @@ describe('enqueueCodexUserText', () => {
         const queue = {
             push: vi.fn(),
             pushIsolateAndClear: vi.fn(),
+            pushIsolated: vi.fn(),
         };
 
         const result = enqueueCodexUserText({
@@ -67,5 +71,27 @@ describe('enqueueCodexUserText', () => {
         expect(result).toBe('clear');
         expect(queue.pushIsolateAndClear).toHaveBeenCalledWith('/clear', mode, attachments);
         expect(queue.push).not.toHaveBeenCalled();
+        expect(queue.pushIsolated).not.toHaveBeenCalled();
+    });
+
+    it('enqueues a mid-turn follow-up as isolated so rapid sends stay separate', () => {
+        const mode = { permissionMode: 'default' as const };
+        const queue = {
+            push: vi.fn(),
+            pushIsolateAndClear: vi.fn(),
+            pushIsolated: vi.fn(),
+        };
+
+        const result = enqueueCodexUserText({
+            text: 'stop that and do this',
+            mode,
+            queue,
+            isolate: true,
+        });
+
+        expect(result).toBe('queued');
+        expect(queue.pushIsolated).toHaveBeenCalledWith('stop that and do this', mode, undefined);
+        expect(queue.push).not.toHaveBeenCalled();
+        expect(queue.pushIsolateAndClear).not.toHaveBeenCalled();
     });
 });

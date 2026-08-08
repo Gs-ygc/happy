@@ -75,6 +75,21 @@ describe('sessionMessageSearch', () => {
         ], result, 'restart')).toBe('rendered-1');
     });
 
+    it('prefers an exact source message id match over fuzzy timestamp/text matching', () => {
+        const result = {
+            seq: 42,
+            sourceMessageId: 'api-1',
+            createdAt: 1234,
+            role: 'agent' as const,
+            text: 'Use systemctl restart happy',
+            preview: 'Use systemctl restart happy',
+        };
+        expect(findLoadedMessageForSearchResult([
+            { kind: 'agent-text', id: 'decoy', sourceMessageId: 'api-other', localId: null, createdAt: 1234, text: 'Use systemctl restart happy' },
+            { kind: 'agent-text', id: 'target', sourceMessageId: 'api-1', localId: null, createdAt: 9999, text: 'completely different text' },
+        ], result, 'restart')).toBe('target');
+    });
+
     it('locates direct messages and messages inside collapsed groups', () => {
         const direct = { kind: 'user-text', id: 'direct', localId: null, createdAt: 3, text: 'hello' } as const;
         const nested = { kind: 'agent-text', id: 'nested', localId: null, createdAt: 2, text: 'result' } as const;

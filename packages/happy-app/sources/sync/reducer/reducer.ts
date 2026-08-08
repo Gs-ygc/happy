@@ -1227,6 +1227,7 @@ function convertReducerMessageToMessage(reducerMsg: ReducerMessage, state: Reduc
         return {
             id: reducerMsg.id,
             localId: reducerMsg.localId ?? null,
+            sourceMessageId: reducerMsg.realID ?? reducerMsg.id,
             createdAt: reducerMsg.createdAt,
             kind: 'user-text',
             text: reducerMsg.text,
@@ -1239,6 +1240,7 @@ function convertReducerMessageToMessage(reducerMsg: ReducerMessage, state: Reduc
         return {
             id: reducerMsg.id,
             localId: null,
+            sourceMessageId: reducerMsg.realID ?? reducerMsg.id,
             createdAt: reducerMsg.createdAt,
             kind: 'agent-text',
             text: reducerMsg.text,
@@ -1259,6 +1261,7 @@ function convertReducerMessageToMessage(reducerMsg: ReducerMessage, state: Reduc
         return {
             id: reducerMsg.id,
             localId: null,
+            sourceMessageId: reducerMsg.realID ?? reducerMsg.id,
             createdAt: reducerMsg.createdAt,
             kind: 'tool-call',
             tool: { ...reducerMsg.tool },
@@ -1268,6 +1271,7 @@ function convertReducerMessageToMessage(reducerMsg: ReducerMessage, state: Reduc
     } else if (reducerMsg.role === 'agent' && reducerMsg.event !== null) {
         return {
             id: reducerMsg.id,
+            sourceMessageId: reducerMsg.realID ?? reducerMsg.id,
             createdAt: reducerMsg.createdAt,
             kind: 'agent-event',
             event: reducerMsg.event,

@@ -61,6 +61,13 @@ type PendingRequest = {
     epoch: number;
 };
 
+type AbortTurnWithFallbackResult = {
+    hadActiveTurn: boolean;
+    aborted: boolean;
+    forcedRestart: boolean;
+    resumedThread: boolean;
+};
+
 type LegacyPatchChanges = Record<string, Record<string, unknown>>;
 
 const MODEL_LIST_PAGE_SIZE = 100;
@@ -248,6 +255,7 @@ export class CodexAppServerClient {
     // Tracks in-flight interruptTurn() RPCs so sendTurnAndWait can wait for them
     // before starting a new turn (prevents stale turn/interrupt from aborting the next turn).
     private pendingInterrupt: Promise<void> | null = null;
+    private pendingAbortTurnWithFallback: Promise<AbortTurnWithFallbackResult> | null = null;
     private notificationProtocol: 'unknown' | 'legacy' | 'raw' = 'unknown';
     private startedTurnIds = new Set<string>();
     private completedTurnIds = new Set<string>();
@@ -298,6 +306,26 @@ export class CodexAppServerClient {
     private extractTurnStatus(params: any): string | null {
         const status = params?.turn?.status ?? params?.status ?? null;
         return typeof status === 'string' && status.length > 0 ? status : null;
+    }
+
+    private logRawNotification(method: string, params: any): void {
+        if (method === 'turn/started' || method === 'turn/completed' || method === 'thread/status/changed') {
+            logger.debug(`[CodexAppServer] Raw notification: ${method} ${JSON.stringify(params)}`);
+            return;
+        }
+
+        if (method === 'item/agentMessage/delta') {
+            const itemId = stringOrNull(params?.itemId ?? params?.item_id);
+            const delta = typeof params?.delta === 'string' ? params.delta : '';
+            if (process.env.DEBUG) {
+                logger.debug(`[CodexAppServer] Raw notification: ${method} ${JSON.stringify(params)}`);
+            } else {
+                logger.debug(`[CodexAppServer] Raw notification: ${method} item_id=${itemId ?? 'none'} delta_length=${delta.length}`);
+            }
+            return;
+        }
+
+        logger.debug(`[CodexAppServer] Raw notification: ${method}`);
     }
 
     private shouldHandleRawNotification(method: string): boolean {
@@ -1133,7 +1161,26 @@ export class CodexAppServerClient {
     async abortTurnWithFallback(opts?: {
         gracePeriodMs?: number;
         forceRestartOnTimeout?: boolean;
-    }): Promise<{ hadActiveTurn: boolean; aborted: boolean; forcedRestart: boolean; resumedThread: boolean }> {
+    }): Promise<AbortTurnWithFallbackResult> {
+        if (this.pendingAbortTurnWithFallback) {
+            return this.pendingAbortTurnWithFallback;
+        }
+
+        const operation = this.performAbortTurnWithFallback(opts);
+        this.pendingAbortTurnWithFallback = operation;
+        try {
+            return await operation;
+        } finally {
+            if (this.pendingAbortTurnWithFallback === operation) {
+                this.pendingAbortTurnWithFallback = null;
+            }
+        }
+    }
+
+    private async performAbortTurnWithFallback(opts?: {
+        gracePeriodMs?: number;
+        forceRestartOnTimeout?: boolean;
+    }): Promise<AbortTurnWithFallbackResult> {
         const hadActiveTurn = this.hasPendingTurnCompletion();
 
         // No active turn pending in this client call-site.
@@ -1295,6 +1342,10 @@ export class CodexAppServerClient {
         if (!this._turnId) {
             logger.debug('[CodexAppServer] interruptTurn: no active turnId, skipping');
             return;
+        }
+        if (this.pendingInterrupt) {
+            logger.debug('[CodexAppServer] interruptTurn already in flight; reusing existing RPC');
+            return this.pendingInterrupt;
         }
         const params: InterruptConversationParams = {
             threadId: this._threadId,
@@ -1658,14 +1709,14 @@ export class CodexAppServerClient {
         }
 
         if (this.handleRawNotification(method, params)) {
-            logger.debug(`[CodexAppServer] Raw notification: ${method}`);
+            this.logRawNotification(method, params);
             return;
         }
 
         // v2 lifecycle notifications
         if (method === 'thread/started' || method === 'turn/started' ||
             method === 'turn/completed' || method === 'thread/status/changed') {
-            logger.debug(`[CodexAppServer] Lifecycle notification: ${method}`);
+            this.logRawNotification(method, params);
             // Mark the turn as started so the completion guard lets it through.
             if (method === 'turn/started') {
                 const turnId = this.extractTurnId(params);

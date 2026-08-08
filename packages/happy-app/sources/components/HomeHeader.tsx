@@ -120,13 +120,25 @@ function HeaderRight() {
     const { theme } = useUnistyles();
 
     return (
-        <Pressable
-            onPress={() => router.navigate('/new')}
-            hitSlop={15}
-            style={styles.headerButton}
-        >
-            <Ionicons name="add-outline" size={28} color={theme.colors.header.tint} />
-        </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Pressable
+                onPress={() => router.navigate('/session/search')}
+                hitSlop={15}
+                accessibilityRole="button"
+                accessibilityLabel={t('globalSearch.open')}
+                style={styles.headerButton}
+            >
+                <Ionicons name="search-outline" size={24} color={theme.colors.header.tint} />
+            </Pressable>
+            <Pressable
+                onPress={() => router.navigate('/new')}
+                hitSlop={15}
+                accessibilityRole="button"
+                style={styles.headerButton}
+            >
+                <Ionicons name="add-outline" size={28} color={theme.colors.header.tint} />
+            </Pressable>
+        </View>
     );
 }
 

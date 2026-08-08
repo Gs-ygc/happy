@@ -92,12 +92,31 @@ export type SessionMessageSearchProgress = {
     matches: number;
 };
 
+export type GlobalSessionMessageSearchResult = SessionMessageSearchResult & {
+    sessionId: string;
+};
+
+export type GlobalSessionMessageSearchResponse = {
+    results: GlobalSessionMessageSearchResult[];
+    scannedSessions: number;
+    scannedMessages: number;
+    truncated: boolean;
+};
+
+export type GlobalSessionMessageSearchProgress = {
+    scannedSessions: number;
+    scannedMessages: number;
+    matches: number;
+};
+
 // Sentinel used as `before_seq` for the very first backward fetch of a
 // session. It must exceed any real `seq` value the server can produce.
 // `seq` is stored as Postgres int4 on the server, so the maximum is
 // 2_147_483_647. We use that exact upper bound to keep the request safely
 // within int4 while still being effectively "infinite" for any session.
 const SEQ_BACKWARD_INITIAL_SENTINEL = 2_147_483_647;
+const SEARCH_MESSAGE_PAGE_LIMIT = 250;
+const SEARCH_RESULT_LOAD_MAX_PAGES = 100;
 
 type V3PostSessionMessagesResponse = {
     messages: Array<{
@@ -2124,15 +2143,103 @@ class Sync {
             throw new Error(`Session encryption not ready for ${sessionId}`);
         }
 
+        return this.scanSessionMessagePages(sessionId, query, {
+            encryption,
+            persist: true,
+            signal: options?.signal,
+            onProgress: options?.onProgress,
+        });
+    }
+
+    searchGlobalMessages = async (
+        query: string,
+        options?: {
+            signal?: AbortSignal;
+            onProgress?: (progress: GlobalSessionMessageSearchProgress) => void;
+        },
+    ): Promise<GlobalSessionMessageSearchResponse> => {
+        const allSessions = Object.values(storage.getState().sessions)
+            .filter((session) => !!session)
+            .sort((a, b) => b.updatedAt - a.updatedAt);
+        const results: GlobalSessionMessageSearchResult[] = [];
+        let scannedSessions = 0;
+        let scannedMessages = 0;
+        let truncated = false;
+
+        for (const session of allSessions) {
+            if (options?.signal?.aborted) break;
+
+            const encryption = this.encryption.getSessionEncryption(session.id);
+            if (!encryption) {
+                scannedSessions += 1;
+                options?.onProgress?.({
+                    scannedSessions,
+                    scannedMessages,
+                    matches: results.length,
+                });
+                continue;
+            }
+
+            try {
+                const response = await this.scanSessionMessagePages(session.id, query, {
+                    encryption,
+                    persist: false,
+                    signal: options?.signal,
+                    onProgress: (progress) => {
+                        options?.onProgress?.({
+                            scannedSessions,
+                            scannedMessages: progress.scanned,
+                            matches: results.length + progress.matches,
+                        });
+                    },
+                });
+                scannedMessages += response.scanned;
+                for (const result of response.results) {
+                    results.push({ ...result, sessionId: session.id });
+                    if (results.length >= SESSION_SEARCH_RESULT_LIMIT) {
+                        truncated = true;
+                        break;
+                    }
+                }
+            } catch (error) {
+                console.error(`Failed to search session ${session.id}:`, error);
+            }
+
+            scannedSessions += 1;
+            options?.onProgress?.({
+                scannedSessions,
+                scannedMessages,
+                matches: results.length,
+            });
+            if (truncated || options?.signal?.aborted) break;
+        }
+
+        return { results, scannedSessions, scannedMessages, truncated };
+    }
+
+    private scanSessionMessagePages = async (
+        sessionId: string,
+        query: string,
+        options: {
+            encryption: NonNullable<ReturnType<Encryption['getSessionEncryption']>>;
+            persist: boolean;
+            signal?: AbortSignal;
+            startBeforeSeq?: number;
+            onProgress?: (progress: SessionMessageSearchProgress) => void;
+        },
+    ): Promise<SessionMessageSearchResponse> => {
+        const encryption = options.encryption;
+
         const results: SessionMessageSearchResult[] = [];
         let scanned = 0;
-        let beforeSeq = SEQ_BACKWARD_INITIAL_SENTINEL;
+        let beforeSeq = options.startBeforeSeq ?? SEQ_BACKWARD_INITIAL_SENTINEL;
         let truncated = false;
 
         while (true) {
+            if (options.signal?.aborted) break;
             const response = await apiSocket.request(
-                `/v3/sessions/${sessionId}/messages?before_seq=${beforeSeq}&limit=250`,
-                { signal: options?.signal },
+                `/v3/sessions/${sessionId}/messages?before_seq=${beforeSeq}&limit=${SEARCH_MESSAGE_PAGE_LIMIT}`,
+                { signal: options.signal },
             );
             if (!response.ok) {
                 throw new Error(`Failed to search messages for ${sessionId}: ${response.status}`);
@@ -2141,6 +2248,10 @@ class Sync {
             const data = await response.json() as V3GetSessionMessagesResponse;
             const messages = Array.isArray(data.messages) ? data.messages : [];
             if (messages.length === 0) break;
+
+            if (options.persist) {
+                await this.applyFetchedMessages(sessionId, encryption, messages);
+            }
 
             const decryptedMessages = await encryption.decryptMessages(messages);
             for (let index = 0; index < messages.length; index += 1) {
@@ -2164,7 +2275,7 @@ class Sync {
             }
 
             scanned += messages.length;
-            options?.onProgress?.({ scanned, matches: results.length });
+            options.onProgress?.({ scanned, matches: results.length });
             if (results.length >= SESSION_SEARCH_RESULT_LIMIT || !data.hasMore) break;
 
             let minSeq = beforeSeq;
@@ -2194,19 +2305,34 @@ class Sync {
 
         const lock = this.getSessionMessageLock(sessionId);
         return lock.inLock(async () => {
-            const beforeSeq = Math.min(SEQ_BACKWARD_INITIAL_SENTINEL, result.seq + 1);
-            const response = await apiSocket.request(
-                `/v3/sessions/${sessionId}/messages?before_seq=${beforeSeq}&limit=100`,
-            );
-            if (!response.ok) {
-                throw new Error(`Failed to load search result for ${sessionId}: ${response.status}`);
-            }
-            const data = await response.json() as V3GetSessionMessagesResponse;
-            const messages = Array.isArray(data.messages) ? data.messages : [];
-            await this.applyFetchedMessages(sessionId, encryption, messages);
+            let beforeSeq = Math.min(SEQ_BACKWARD_INITIAL_SENTINEL, result.seq + 1);
+            for (let page = 0; page < SEARCH_RESULT_LOAD_MAX_PAGES; page += 1) {
+                const response = await apiSocket.request(
+                    `/v3/sessions/${sessionId}/messages?before_seq=${beforeSeq}&limit=${SEARCH_MESSAGE_PAGE_LIMIT}`,
+                );
+                if (!response.ok) {
+                    throw new Error(`Failed to load search result for ${sessionId}: ${response.status}`);
+                }
+                const data = await response.json() as V3GetSessionMessagesResponse;
+                const messages = Array.isArray(data.messages) ? data.messages : [];
+                if (messages.length > 0) {
+                    await this.applyFetchedMessages(sessionId, encryption, messages);
+                }
 
-            const loadedMessages = storage.getState().sessionMessages[sessionId]?.messages ?? [];
-            return findLoadedMessageForSearchResult(loadedMessages, result, query);
+                const loadedMessages = storage.getState().sessionMessages[sessionId]?.messages ?? [];
+                const matched = findLoadedMessageForSearchResult(loadedMessages, result, query);
+                if (matched) return matched;
+
+                if (messages.length === 0 || !data.hasMore) break;
+
+                let minSeq = beforeSeq;
+                for (const message of messages) {
+                    if (message.seq < minSeq) minSeq = message.seq;
+                }
+                if (minSeq >= beforeSeq) break;
+                beforeSeq = minSeq;
+            }
+            return null;
         });
     }
 

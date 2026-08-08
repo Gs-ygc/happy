@@ -106,6 +106,15 @@ export function findLoadedMessageForSearchResult(
     if (!normalizedQuery) return null;
 
     for (const message of messages) {
+        if (message.sourceMessageId === result.sourceMessageId) {
+            if (message.kind !== 'user-text' && message.kind !== 'agent-text') continue;
+            if (result.role === 'user' && message.kind !== 'user-text') continue;
+            if (result.role === 'agent' && message.kind !== 'agent-text') continue;
+            return message.id;
+        }
+    }
+
+    for (const message of messages) {
         if (message.createdAt !== result.createdAt) continue;
         if (message.kind !== 'user-text' && message.kind !== 'agent-text') continue;
         if (result.role === 'user' && message.kind !== 'user-text') continue;
