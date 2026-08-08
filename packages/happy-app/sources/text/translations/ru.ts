@@ -28,7 +28,7 @@ function plural({ count, one, few, many }: { count: number; one: string; few: st
 export const ru: TranslationStructure = {
     tabs: {
         // Tab navigation labels
-        inbox: 'Входящие',
+        inbox: 'Активность',
         tasks: 'Задачи',
         sessions: 'Терминалы',
         settings: 'Настройки',
@@ -39,6 +39,11 @@ export const ru: TranslationStructure = {
         emptyTitle: 'Входящие пусты',
         emptyDescription: 'Подключитесь к друзьям, чтобы начать делиться сессиями',
         updates: 'Обновления',
+    },
+
+    activity: {
+        title: 'Активность', today: 'Сегодня', older: 'Ранее', emptyTitle: 'Всё просмотрено',
+        emptyDescription: 'Непрочитанные обновления задач появятся здесь.', markAllRead: 'Отметить всё как прочитанное', newActivity: 'Новая активность',
     },
 
     common: {

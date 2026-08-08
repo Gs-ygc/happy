@@ -20,7 +20,7 @@ function plural({ count, singular, plural }: { count: number; singular: string; 
 export const ja: TranslationStructure = {
     tabs: {
         // Tab navigation labels
-        inbox: '受信トレイ',
+        inbox: 'アクティビティ',
         tasks: 'タスク',
         sessions: 'ターミナル',
         settings: '設定',
@@ -31,6 +31,11 @@ export const ja: TranslationStructure = {
         emptyTitle: '受信トレイは空です',
         emptyDescription: '友達と接続してセッションを共有しましょう',
         updates: '更新',
+    },
+
+    activity: {
+        title: 'アクティビティ', today: '今日', older: '過去', emptyTitle: 'すべて確認済み',
+        emptyDescription: '未読のタスク更新がここに表示されます。', markAllRead: 'すべて既読にする', newActivity: '新しいアクティビティ',
     },
 
     common: {

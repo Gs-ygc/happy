@@ -19,7 +19,7 @@ function plural({ count, singular, plural }: { count: number; singular: string; 
 export const zhHant: TranslationStructure = {
     tabs: {
         // Tab navigation labels
-        inbox: '收件匣',
+        inbox: '動態',
         tasks: '任務',
         sessions: '終端',
         settings: '設定',
@@ -30,6 +30,11 @@ export const zhHant: TranslationStructure = {
         emptyTitle: '收件匣是空的',
         emptyDescription: '與好友建立連結，開始共享工作階段',
         updates: '更新',
+    },
+
+    activity: {
+        title: '動態', today: '今天', older: '更早', emptyTitle: '已全部查看',
+        emptyDescription: '未讀的任務更新會顯示在這裡，並可直接開啟對應工作階段。', markAllRead: '全部標記為已讀', newActivity: '新動態',
     },
 
     common: {

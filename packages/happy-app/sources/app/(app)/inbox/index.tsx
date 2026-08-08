@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { View, Text, Platform, Pressable } from 'react-native';
-import { InboxView } from "@/components/InboxView";
+import { ActivityView } from "@/components/ActivityView";
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
@@ -109,16 +109,16 @@ export default function InboxPage() {
                                 color={theme.colors.header.tint}
                             />
                         </Pressable>
-                        <Text style={styles.headerTitle}>{t('tabs.inbox')}</Text>
+                        <Text style={styles.headerTitle}>{t('activity.title')}</Text>
                     </View>
                 </View>
-                <InboxView />
+                <ActivityView />
             </View>
         );
     }
 
     // Tablet mode: render with header and friend button
     return (
-        <InboxView />
+        <ActivityView />
     );
 }

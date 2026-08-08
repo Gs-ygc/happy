@@ -17,7 +17,7 @@ function plural({ count, singular, plural }: { count: number; singular: string; 
 export const pt: TranslationStructure = {
     tabs: {
         // Tab navigation labels
-        inbox: 'Caixa de entrada',
+        inbox: 'Atividade',
         tasks: 'Tarefas',
         sessions: 'Terminais',
         settings: 'Configurações',
@@ -28,6 +28,11 @@ export const pt: TranslationStructure = {
         emptyTitle: 'Caixa de entrada vazia',
         emptyDescription: 'Conecte-se com amigos para começar a compartilhar sessões',
         updates: 'Atualizações',
+    },
+
+    activity: {
+        title: 'Atividade', today: 'Hoje', older: 'Anteriores', emptyTitle: 'Tudo em dia',
+        emptyDescription: 'As atualizações não lidas das tarefas aparecerão aqui.', markAllRead: 'Marcar toda a atividade como lida', newActivity: 'Nova atividade',
     },
 
     common: {

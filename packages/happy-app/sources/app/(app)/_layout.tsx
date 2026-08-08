@@ -49,7 +49,7 @@ export default function RootLayout() {
                 name="inbox/index"
                 options={{
                     headerShown: false,
-                    headerTitle: t('tabs.inbox'),
+                    headerTitle: t('activity.title'),
                     headerBackTitle: t('common.home')
                 }}
             />

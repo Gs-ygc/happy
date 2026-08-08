@@ -32,7 +32,7 @@ function plural({ count, singular, plural }: { count: number; singular: string; 
 export const en: TranslationStructure = {
     tabs: {
         // Tab navigation labels
-        inbox: 'Inbox',
+        inbox: 'Activity',
         tasks: 'Tasks',
         sessions: 'Terminals',
         settings: 'Settings',
@@ -43,6 +43,12 @@ export const en: TranslationStructure = {
         emptyTitle: 'Empty Inbox',
         emptyDescription: 'Connect with friends to start sharing sessions',
         updates: 'Updates',
+    },
+
+    activity: {
+        title: 'Activity', today: 'Today', older: 'Older', emptyTitle: 'All caught up',
+        emptyDescription: 'Unread task updates will appear here and open the related session.',
+        markAllRead: 'Mark all activity as read', newActivity: 'New activity',
     },
 
     common: {
