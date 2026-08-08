@@ -3,6 +3,8 @@ import type { Message } from '@/sync/typesMessage';
 import type { NormalizedMessage } from '@/sync/typesRaw';
 
 export const SESSION_SEARCH_RESULT_LIMIT = 200;
+const SEARCH_SCROLL_MAX_RETRIES = 3;
+const SEARCH_SCROLL_RETRY_DELAY_MS = 160;
 
 export type SessionMessageSearchResult = {
     seq: number;
@@ -62,6 +64,57 @@ export function findDisplayItemIndexForMessage(
         }
     }
     return null;
+}
+
+export type SearchScrollFailureInfo = {
+    averageItemLength: number;
+    highestMeasuredFrameIndex: number;
+    index: number;
+};
+
+export type SearchScrollRecovery =
+    | { kind: 'retry'; offset: number; delayMs: number; nextAttempt: number }
+    | { kind: 'failed' };
+
+export type SearchLocationResolution =
+    | { kind: 'ready' }
+    | { kind: 'retry'; delayMs: number; nextAttempt: number }
+    | { kind: 'failed' };
+
+export function getSearchLocationResolution(
+    found: boolean,
+    attempt: number,
+): SearchLocationResolution {
+    if (found) {
+        return { kind: 'ready' };
+    }
+    if (attempt >= SEARCH_SCROLL_MAX_RETRIES) {
+        return { kind: 'failed' };
+    }
+    return {
+        kind: 'retry',
+        delayMs: SEARCH_SCROLL_RETRY_DELAY_MS,
+        nextAttempt: attempt + 1,
+    };
+}
+
+export function getSearchScrollRecovery(
+    info: SearchScrollFailureInfo,
+    attempt: number,
+): SearchScrollRecovery {
+    if (attempt >= SEARCH_SCROLL_MAX_RETRIES) {
+        return { kind: 'failed' };
+    }
+
+    const averageItemLength = Number.isFinite(info.averageItemLength) && info.averageItemLength > 0
+        ? info.averageItemLength
+        : 72;
+    return {
+        kind: 'retry',
+        offset: Math.max(0, Math.round(averageItemLength * info.index)),
+        delayMs: SEARCH_SCROLL_RETRY_DELAY_MS,
+        nextAttempt: attempt + 1,
+    };
 }
 
 export function createSessionMessageSearchResult(

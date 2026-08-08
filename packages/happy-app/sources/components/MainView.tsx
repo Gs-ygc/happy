@@ -179,19 +179,40 @@ const HeaderRight = React.memo(({ activeTab }: { activeTab: ActiveTabType }) => 
 
     if (activeTab === 'sessions') {
         return (
-            <Pressable
-                onPress={() => router.navigate('/new')}
-                hitSlop={15}
-                style={styles.headerButton}
-            >
-                <Ionicons name="add-outline" size={28} color={theme.colors.header.tint} />
-            </Pressable>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Pressable
+                    onPress={() => router.navigate('/session/search')}
+                    hitSlop={15}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('globalSearch.open')}
+                    style={styles.headerButton}
+                >
+                    <Ionicons name="search-outline" size={24} color={theme.colors.header.tint} />
+                </Pressable>
+                <Pressable
+                    onPress={() => router.navigate('/new')}
+                    hitSlop={15}
+                    accessibilityRole="button"
+                    style={styles.headerButton}
+                >
+                    <Ionicons name="add-outline" size={28} color={theme.colors.header.tint} />
+                </Pressable>
+            </View>
         );
     }
 
     if (activeTab === 'tasks') {
-        // Keep the header title centered; the Task Center has its own in-list actions.
-        return <View style={styles.headerButton} />;
+        return (
+            <Pressable
+                onPress={() => router.navigate('/session/search')}
+                hitSlop={15}
+                accessibilityRole="button"
+                accessibilityLabel={t('globalSearch.open')}
+                style={styles.headerButton}
+            >
+                <Ionicons name="search-outline" size={24} color={theme.colors.header.tint} />
+            </Pressable>
+        );
     }
 
     if (activeTab === 'settings') {

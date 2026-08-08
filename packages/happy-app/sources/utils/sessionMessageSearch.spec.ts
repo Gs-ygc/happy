@@ -5,6 +5,8 @@ import {
     createSessionMessageSearchResult,
     findDisplayItemIndexForMessage,
     findLoadedMessageForSearchResult,
+    getSearchLocationResolution,
+    getSearchScrollRecovery,
     getNormalizedMessageSearchText,
     normalizeSessionSearchText,
 } from './sessionMessageSearch';
@@ -109,5 +111,39 @@ describe('sessionMessageSearch', () => {
         expect(findDisplayItemIndexForMessage(items, 'direct')).toEqual({ index: 0, groupId: null });
         expect(findDisplayItemIndexForMessage(items, 'nested')).toEqual({ index: 1, groupId: 'work-1' });
         expect(findDisplayItemIndexForMessage(items, 'missing')).toBeNull();
+    });
+
+    it('moves a virtualized list near an unmeasured search result before retrying', () => {
+        expect(getSearchScrollRecovery({
+            averageItemLength: 84,
+            highestMeasuredFrameIndex: 9,
+            index: 120,
+        }, 0)).toEqual({
+            kind: 'retry',
+            offset: 10080,
+            delayMs: 160,
+            nextAttempt: 1,
+        });
+    });
+
+    it('stops retrying an unreachable search result so the UI can report failure', () => {
+        expect(getSearchScrollRecovery({
+            averageItemLength: 84,
+            highestMeasuredFrameIndex: 30,
+            index: 120,
+        }, 3)).toEqual({ kind: 'failed' });
+    });
+
+    it('waits briefly for a loaded message to enter the rendered list', () => {
+        expect(getSearchLocationResolution(false, 0)).toEqual({
+            kind: 'retry',
+            delayMs: 160,
+            nextAttempt: 1,
+        });
+        expect(getSearchLocationResolution(true, 1)).toEqual({ kind: 'ready' });
+    });
+
+    it('reports failure when a loaded message never becomes renderable', () => {
+        expect(getSearchLocationResolution(false, 3)).toEqual({ kind: 'failed' });
     });
 });

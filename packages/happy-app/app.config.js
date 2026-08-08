@@ -90,7 +90,7 @@ export default {
             associatedDomains: variant === 'production' ? ["applinks:app.happy.engineering"] : []
         },
         android: {
-            versionCode: 165,
+            versionCode: 166,
             adaptiveIcon: {
                 foregroundImage: "./sources/assets/images/icon-adaptive.png",
                 monochromeImage: "./sources/assets/images/icon-monochrome.png",

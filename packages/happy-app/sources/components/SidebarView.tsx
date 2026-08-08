@@ -24,11 +24,9 @@ const stylesheet = StyleSheet.create((theme) => ({
         borderColor: theme.colors.divider,
     },
     newSessionButton: {
+        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
-        marginHorizontal: 16,
-        marginTop: 8,
-        marginBottom: 4,
         paddingVertical: 10,
         paddingHorizontal: 14,
         borderRadius: 10,
@@ -36,6 +34,24 @@ const stylesheet = StyleSheet.create((theme) => ({
         borderColor: theme.colors.divider,
         backgroundColor: theme.colors.surface,
         gap: 8,
+    },
+    primaryActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginHorizontal: 16,
+        marginTop: 8,
+        marginBottom: 4,
+        gap: 8,
+    },
+    searchButton: {
+        width: 42,
+        height: 42,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 10,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.divider,
+        backgroundColor: theme.colors.surface,
     },
     newSessionButtonPressed: {
         backgroundColor: theme.colors.surfacePressed,
@@ -140,17 +156,26 @@ export const SidebarView = React.memo(() => {
             style={[styles.container, { paddingTop: safeArea.top + headerHeight }]}
             {...(isMacTauri() ? { dataSet: { happyMacSidebar: 'true' } } : {})}
         >
-            {/* New Session button */}
-            <Pressable
-                onPress={handleNewSession}
-                style={({ pressed }) => [
-                    styles.newSessionButton,
-                    pressed && styles.newSessionButtonPressed,
-                ]}
-            >
-                <Ionicons name="create-outline" size={16} color={stylesheet.newSessionText.color} />
-                <Text style={styles.newSessionText}>{t('sidebar.newSession')}</Text>
-            </Pressable>
+            <View style={styles.primaryActions}>
+                <Pressable
+                    onPress={handleNewSession}
+                    style={({ pressed }) => [
+                        styles.newSessionButton,
+                        pressed && styles.newSessionButtonPressed,
+                    ]}
+                >
+                    <Ionicons name="create-outline" size={16} color={stylesheet.newSessionText.color} />
+                    <Text style={styles.newSessionText}>{t('sidebar.newSession')}</Text>
+                </Pressable>
+                <Pressable
+                    onPress={() => router.navigate('/session/search')}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('globalSearch.open')}
+                    style={({ pressed }) => [styles.searchButton, pressed && styles.newSessionButtonPressed]}
+                >
+                    <Ionicons name="search-outline" size={20} color={stylesheet.newSessionText.color} />
+                </Pressable>
+            </View>
 
             {realtimeStatus !== 'disconnected' && (
                 <VoiceAssistantStatusBar variant="sidebar" />

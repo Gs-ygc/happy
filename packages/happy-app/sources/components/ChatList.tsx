@@ -19,7 +19,11 @@ import { useSessionQuickActions } from '@/hooks/useSessionQuickActions';
 import { resolveControlMode } from '@/sync/controlHandoff';
 import { usesControlledSessionUi } from '@/sync/rig';
 import { useSessionMessageSearchNav } from '@/-session/sessionMessageSearchNav';
-import { findDisplayItemIndexForMessage } from '@/utils/sessionMessageSearch';
+import {
+    findDisplayItemIndexForMessage,
+    getSearchLocationResolution,
+    getSearchScrollRecovery,
+} from '@/utils/sessionMessageSearch';
 import { t } from '@/text';
 
 const SCROLL_THRESHOLD = 300;
@@ -75,10 +79,15 @@ const ChatListInternal = React.memo((props: {
     const [showScrollButton, setShowScrollButton] = React.useState(false);
     const [handoffListRevision, setHandoffListRevision] = React.useState(0);
     const [pendingSearchMessageId, setPendingSearchMessageId] = React.useState<string | null>(null);
+    const [searchLocationAttempt, setSearchLocationAttempt] = React.useState(0);
     const [highlightedMessageId, setHighlightedMessageId] = React.useState<string | null>(null);
     const searchJump = useSessionMessageSearchNav((state) => state.jump);
     const handledSearchJumpRef = React.useRef<number | null>(null);
     const highlightTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const searchLocationRetryTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const searchScrollRetryTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const searchScrollAttemptRef = React.useRef(0);
+    const searchScrollTargetRef = React.useRef<{ messageId: string; index: number } | null>(null);
     // Tracks whether the scroll-button is currently shown, so we only call
     // setShowScrollButton when the threshold is actually crossed instead of
     // on every scroll frame (60Hz). Without this guard, the entire list
@@ -197,6 +206,7 @@ const ChatListInternal = React.memo((props: {
                     Modal.alert(t('sessionSearch.jumpFailedTitle'), t('sessionSearch.jumpFailedMessage'));
                     return;
                 }
+                setSearchLocationAttempt(0);
                 setPendingSearchMessageId(messageId);
             })
             .catch((error) => {
@@ -218,7 +228,20 @@ const ChatListInternal = React.memo((props: {
     React.useEffect(() => {
         if (!pendingSearchMessageId) return;
         const location = findDisplayItemIndexForMessage(displayItems, pendingSearchMessageId);
-        if (!location) return;
+        const resolution = getSearchLocationResolution(location !== null, searchLocationAttempt);
+        if (resolution.kind === 'retry') {
+            if (searchLocationRetryTimerRef.current) clearTimeout(searchLocationRetryTimerRef.current);
+            searchLocationRetryTimerRef.current = setTimeout(() => {
+                setSearchLocationAttempt(resolution.nextAttempt);
+            }, resolution.delayMs);
+            return;
+        }
+        if (resolution.kind === 'failed' || !location) {
+            setPendingSearchMessageId(null);
+            Modal.alert(t('sessionSearch.jumpFailedTitle'), t('sessionSearch.jumpFailedMessage'));
+            return;
+        }
+        if (searchLocationRetryTimerRef.current) clearTimeout(searchLocationRetryTimerRef.current);
 
         if (location.groupId) {
             manuallyCollapsedRef.current.delete(location.groupId);
@@ -231,6 +254,9 @@ const ChatListInternal = React.memo((props: {
         }
 
         if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+        if (searchScrollRetryTimerRef.current) clearTimeout(searchScrollRetryTimerRef.current);
+        searchScrollAttemptRef.current = 0;
+        searchScrollTargetRef.current = { messageId: pendingSearchMessageId, index: location.index };
         setHighlightedMessageId(pendingSearchMessageId);
         setPendingSearchMessageId(null);
         const scroll = () => flatListRef.current?.scrollToIndex({
@@ -239,11 +265,16 @@ const ChatListInternal = React.memo((props: {
             viewPosition: 0.5,
         });
         requestAnimationFrame(() => requestAnimationFrame(scroll));
-        highlightTimerRef.current = setTimeout(() => setHighlightedMessageId(null), 2600);
-    }, [displayItems, pendingSearchMessageId]);
+        highlightTimerRef.current = setTimeout(() => {
+            setHighlightedMessageId(null);
+            searchScrollTargetRef.current = null;
+        }, 2600);
+    }, [displayItems, pendingSearchMessageId, searchLocationAttempt]);
 
     React.useEffect(() => () => {
         if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+        if (searchLocationRetryTimerRef.current) clearTimeout(searchLocationRetryTimerRef.current);
+        if (searchScrollRetryTimerRef.current) clearTimeout(searchScrollRetryTimerRef.current);
     }, []);
 
     const keyExtractor = useCallback((item: DisplayItem) => item.id, []);
@@ -382,10 +413,28 @@ const ChatListInternal = React.memo((props: {
                 ListFooterComponent={<ListHeader isLoadingOlder={props.isLoadingOlder} />}
                 onEndReached={handleLoadOlder}
                 onEndReachedThreshold={0.5}
-                onScrollToIndexFailed={({ index }) => {
-                    setTimeout(() => {
-                        flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
-                    }, 120);
+                onScrollToIndexFailed={(info) => {
+                    const target = searchScrollTargetRef.current;
+                    if (!target || target.index !== info.index) return;
+
+                    const recovery = getSearchScrollRecovery(info, searchScrollAttemptRef.current);
+                    if (recovery.kind === 'failed') {
+                        searchScrollTargetRef.current = null;
+                        setHighlightedMessageId(null);
+                        Modal.alert(t('sessionSearch.jumpFailedTitle'), t('sessionSearch.jumpFailedMessage'));
+                        return;
+                    }
+
+                    searchScrollAttemptRef.current = recovery.nextAttempt;
+                    flatListRef.current?.scrollToOffset({ offset: recovery.offset, animated: false });
+                    if (searchScrollRetryTimerRef.current) clearTimeout(searchScrollRetryTimerRef.current);
+                    searchScrollRetryTimerRef.current = setTimeout(() => {
+                        flatListRef.current?.scrollToIndex({
+                            index: target.index,
+                            animated: true,
+                            viewPosition: 0.5,
+                        });
+                    }, recovery.delayMs);
                 }}
                 initialNumToRender={10}
                 maxToRenderPerBatch={6}
