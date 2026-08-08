@@ -66,6 +66,62 @@ export function findDisplayItemIndexForMessage(
     return null;
 }
 
+export function findLoadedSessionMessageSearchResults(
+    messages: readonly Message[],
+    query: string,
+): SessionMessageSearchResult[] {
+    const normalizedQuery = normalizeSessionSearchText(query).toLocaleLowerCase();
+    if (!normalizedQuery) return [];
+
+    const seenSourceMessageIds = new Set<string>();
+    const results: SessionMessageSearchResult[] = [];
+    for (const message of messages) {
+        if (message.kind !== 'user-text' && message.kind !== 'agent-text') continue;
+        if (message.kind === 'agent-text' && message.isThinking) continue;
+
+        const text = normalizeSessionSearchText(message.text);
+        const matchIndex = text.toLocaleLowerCase().indexOf(normalizedQuery);
+        if (matchIndex < 0) continue;
+
+        const sourceMessageId = message.sourceMessageId ?? message.id;
+        if (seenSourceMessageIds.has(sourceMessageId)) continue;
+        seenSourceMessageIds.add(sourceMessageId);
+        results.push({
+            seq: 0,
+            sourceMessageId,
+            createdAt: message.createdAt,
+            role: message.kind === 'user-text' ? 'user' : 'agent',
+            text,
+            preview: buildSearchPreview(text, matchIndex, normalizedQuery.length),
+        });
+    }
+    return results;
+}
+
+export async function mapWithConcurrency<T, R>(
+    items: readonly T[],
+    concurrency: number,
+    worker: (item: T, index: number) => Promise<R>,
+    shouldStop: () => boolean = () => false,
+): Promise<R[]> {
+    const workerCount = Math.min(items.length, Math.max(1, Math.floor(concurrency)));
+    const completed = new Map<number, R>();
+    let nextIndex = 0;
+
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (!shouldStop()) {
+            const index = nextIndex;
+            if (index >= items.length) return;
+            nextIndex += 1;
+            completed.set(index, await worker(items[index], index));
+        }
+    }));
+
+    return [...completed.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([, value]) => value);
+}
+
 export type SearchScrollFailureInfo = {
     averageItemLength: number;
     highestMeasuredFrameIndex: number;
@@ -142,8 +198,8 @@ export function createSessionMessageSearchResult(
 
     return {
         seq: apiMessage.seq,
-        sourceMessageId: apiMessage.id,
-        createdAt: apiMessage.createdAt,
+        sourceMessageId: message.id,
+        createdAt: message.createdAt,
         role,
         text: matchingText,
         preview: buildSearchPreview(matchingText, matchIndex, normalizedQuery.length),

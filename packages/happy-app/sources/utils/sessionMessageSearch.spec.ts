@@ -4,10 +4,12 @@ import type { NormalizedMessage } from '@/sync/typesRaw';
 import {
     createSessionMessageSearchResult,
     findDisplayItemIndexForMessage,
+    findLoadedSessionMessageSearchResults,
     findLoadedMessageForSearchResult,
     getSearchLocationResolution,
     getSearchScrollRecovery,
     getNormalizedMessageSearchText,
+    mapWithConcurrency,
     normalizeSessionSearchText,
 } from './sessionMessageSearch';
 
@@ -61,6 +63,25 @@ describe('sessionMessageSearch', () => {
             ],
         } satisfies NormalizedMessage;
         expect(createSessionMessageSearchResult(apiMessage, separateAgentBlocks, 'block second')).toBeNull();
+    });
+
+    it('uses normalized message identity so a search result can reopen its rendered message', () => {
+        const normalized = {
+            id: 'inner-envelope-id',
+            localId: null,
+            createdAt: 5678,
+            role: 'agent',
+            content: [
+                { type: 'text', text: 'The deployment finished', uuid: 'a', parentUUID: null },
+            ],
+            isSidechain: false,
+        } satisfies NormalizedMessage;
+
+        expect(createSessionMessageSearchResult(apiMessage, normalized, 'deployment')).toMatchObject({
+            seq: 42,
+            sourceMessageId: 'inner-envelope-id',
+            createdAt: 5678,
+        });
     });
 
     it('finds the rendered message after the target page is loaded', () => {
@@ -145,5 +166,49 @@ describe('sessionMessageSearch', () => {
 
     it('reports failure when a loaded message never becomes renderable', () => {
         expect(getSearchLocationResolution(false, 3)).toEqual({ kind: 'failed' });
+    });
+
+    it('finds loaded visible messages immediately and deduplicates source records', () => {
+        const results = findLoadedSessionMessageSearchResults([
+            { kind: 'agent-text', id: 'thinking', sourceMessageId: 'source-thinking', localId: null, createdAt: 40, text: 'deploy secret plan', isThinking: true },
+            { kind: 'agent-text', id: 'agent-new', sourceMessageId: 'source-agent', localId: null, createdAt: 30, text: 'Deploy completed successfully' },
+            { kind: 'agent-text', id: 'agent-duplicate', sourceMessageId: 'source-agent', localId: null, createdAt: 29, text: 'Deploy duplicate block' },
+            { kind: 'user-text', id: 'user', sourceMessageId: 'source-user', localId: null, createdAt: 20, text: 'Please deploy production' },
+            { kind: 'user-text', id: 'unmatched', sourceMessageId: 'source-unmatched', localId: null, createdAt: 10, text: 'Unrelated text' },
+        ], 'DEPLOY');
+
+        expect(results).toEqual([
+            {
+                seq: 0,
+                sourceMessageId: 'source-agent',
+                createdAt: 30,
+                role: 'agent',
+                text: 'Deploy completed successfully',
+                preview: 'Deploy completed successfully',
+            },
+            {
+                seq: 0,
+                sourceMessageId: 'source-user',
+                createdAt: 20,
+                role: 'user',
+                text: 'Please deploy production',
+                preview: 'Please deploy production',
+            },
+        ]);
+    });
+
+    it('maps work with bounded concurrency while preserving input order', async () => {
+        let active = 0;
+        let peakActive = 0;
+        const values = await mapWithConcurrency([1, 2, 3, 4, 5], 2, async (value) => {
+            active += 1;
+            peakActive = Math.max(peakActive, active);
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            active -= 1;
+            return value * 10;
+        });
+
+        expect(values).toEqual([10, 20, 30, 40, 50]);
+        expect(peakActive).toBe(2);
     });
 });
