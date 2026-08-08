@@ -10,7 +10,9 @@ import {
     getSearchScrollRecovery,
     getNormalizedMessageSearchText,
     mapWithConcurrency,
+    mergeGlobalSessionMessageSearchResults,
     normalizeSessionSearchText,
+    shouldPublishSearchProgress,
 } from './sessionMessageSearch';
 
 const apiMessage = {
@@ -113,6 +115,21 @@ describe('sessionMessageSearch', () => {
         ], result, 'restart')).toBe('target');
     });
 
+    it('does not resolve an exact source id to a hidden thinking row', () => {
+        const result = {
+            seq: 42,
+            sourceMessageId: 'api-1',
+            createdAt: 1234,
+            role: 'agent' as const,
+            text: 'Use systemctl restart happy',
+            preview: 'Use systemctl restart happy',
+        };
+        expect(findLoadedMessageForSearchResult([
+            { kind: 'agent-text', id: 'thinking', sourceMessageId: 'api-1', localId: null, createdAt: 1234, text: 'private reasoning', isThinking: true },
+            { kind: 'agent-text', id: 'visible', sourceMessageId: 'api-1', localId: null, createdAt: 1234, text: 'Use systemctl restart happy' },
+        ], result, 'restart')).toBe('visible');
+    });
+
     it('locates direct messages and messages inside collapsed groups', () => {
         const direct = { kind: 'user-text', id: 'direct', localId: null, createdAt: 3, text: 'hello' } as const;
         const nested = { kind: 'agent-text', id: 'nested', localId: null, createdAt: 2, text: 'result' } as const;
@@ -210,5 +227,38 @@ describe('sessionMessageSearch', () => {
 
         expect(values).toEqual([10, 20, 30, 40, 50]);
         expect(peakActive).toBe(2);
+    });
+
+    it('merges streamed global results newest-first without duplicate messages', () => {
+        const result = mergeGlobalSessionMessageSearchResults([
+            { sessionId: 'session-a', seq: 1, sourceMessageId: 'message-a', createdAt: 10, role: 'user', text: 'deploy old', preview: 'deploy old' },
+        ], [
+            { sessionId: 'session-a', seq: 1, sourceMessageId: 'message-a', createdAt: 10, role: 'user', text: 'deploy duplicate', preview: 'deploy duplicate' },
+            { sessionId: 'session-b', seq: 2, sourceMessageId: 'message-a', createdAt: 30, role: 'agent', text: 'deploy newest', preview: 'deploy newest' },
+            { sessionId: 'session-a', seq: 3, sourceMessageId: 'message-c', createdAt: 20, role: 'agent', text: 'deploy middle', preview: 'deploy middle' },
+        ], 2, true);
+
+        expect(result).toEqual({
+            results: [
+                { sessionId: 'session-b', seq: 2, sourceMessageId: 'message-a', createdAt: 30, role: 'agent', text: 'deploy newest', preview: 'deploy newest' },
+                { sessionId: 'session-a', seq: 3, sourceMessageId: 'message-c', createdAt: 20, role: 'agent', text: 'deploy middle', preview: 'deploy middle' },
+            ],
+            truncated: true,
+        });
+    });
+
+    it('keeps the truncated flag reported by a remote page scan', () => {
+        const result = mergeGlobalSessionMessageSearchResults([
+            { sessionId: 'session-a', seq: 1, sourceMessageId: 'message-a', createdAt: 10, role: 'user', text: 'deploy', preview: 'deploy' },
+        ], [], 2, true);
+
+        expect(result.truncated).toBe(true);
+    });
+
+    it('rejects progress updates from an aborted search request', () => {
+        const controller = new AbortController();
+        expect(shouldPublishSearchProgress(controller.signal)).toBe(true);
+        controller.abort();
+        expect(shouldPublishSearchProgress(controller.signal)).toBe(false);
     });
 });

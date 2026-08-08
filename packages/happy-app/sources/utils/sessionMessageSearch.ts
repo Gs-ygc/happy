@@ -122,6 +122,32 @@ export async function mapWithConcurrency<T, R>(
         .map(([, value]) => value);
 }
 
+export function mergeGlobalSessionMessageSearchResults<
+    T extends SessionMessageSearchResult & { sessionId: string },
+>(
+    current: readonly T[],
+    incoming: readonly T[],
+    limit: number,
+    sourceTruncated = false,
+): { results: T[]; truncated: boolean } {
+    const merged = new Map<string, T>();
+    for (const result of [...current, ...incoming]) {
+        const key = `${result.sessionId}:${result.sourceMessageId}`;
+        if (!merged.has(key)) {
+            merged.set(key, result);
+        }
+    }
+    const sorted = [...merged.values()].sort((left, right) => right.createdAt - left.createdAt);
+    return {
+        results: sorted.slice(0, Math.max(0, limit)),
+        truncated: sourceTruncated || sorted.length > limit,
+    };
+}
+
+export function shouldPublishSearchProgress(signal?: AbortSignal): boolean {
+    return !signal?.aborted;
+}
+
 export type SearchScrollFailureInfo = {
     averageItemLength: number;
     highestMeasuredFrameIndex: number;
@@ -217,6 +243,7 @@ export function findLoadedMessageForSearchResult(
     for (const message of messages) {
         if (message.sourceMessageId === result.sourceMessageId) {
             if (message.kind !== 'user-text' && message.kind !== 'agent-text') continue;
+            if (message.kind === 'agent-text' && message.isThinking) continue;
             if (result.role === 'user' && message.kind !== 'user-text') continue;
             if (result.role === 'agent' && message.kind !== 'agent-text') continue;
             return message.id;

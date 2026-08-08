@@ -42,8 +42,8 @@
 - Consumes: Task 1 helpers.
 - Produces: `searchGlobalMessages(query, { signal, onProgress, onResults })`, where `onResults` receives a deduplicated newest-first snapshot.
 
-- [ ] Wire the loaded-message pass before remote work and publish it through `onResults`.
-- [ ] Skip loaded latest pages using `sessionOldestSeq` and `hasMoreOlder`.
-- [ ] Run remote session scans with concurrency `4`, page-level result callbacks, aggregate progress, cancellation, and the global result cap.
-- [ ] Update the global search screen to render `onResults` snapshots during the active scan.
+- [x] Wire the loaded-message pass before remote work and publish it through `onResults`.
+- [x] Skip loaded latest pages using `sessionOldestSeq` and `hasMoreOlder`.
+- [x] Run remote session scans with concurrency `4`, page-level result callbacks, aggregate progress, cancellation, and the global result cap.
+- [x] Update the global search screen to render `onResults` snapshots during the active scan.
 - [ ] Bump Android `versionCode` to `167` and run focused tests, full App tests, typecheck, Web smoke, local Gradle build, and GitHub Release verification.

@@ -22,7 +22,10 @@ import {
 } from '@/sync/sync';
 import { getSessionName } from '@/utils/sessionUtils';
 import { t } from '@/text';
-import { normalizeSessionSearchText } from '@/utils/sessionMessageSearch';
+import {
+    normalizeSessionSearchText,
+    shouldPublishSearchProgress,
+} from '@/utils/sessionMessageSearch';
 
 export default React.memo(function GlobalSessionSearchScreen() {
     const router = useRouter();
@@ -67,7 +70,16 @@ export default React.memo(function GlobalSessionSearchScreen() {
         try {
             const response = await sync.searchGlobalMessages(normalizedQuery, {
                 signal: controller.signal,
-                onProgress: setProgress,
+                onProgress: (nextProgress) => {
+                    if (shouldPublishSearchProgress(controller.signal)) {
+                        setProgress(nextProgress);
+                    }
+                },
+                onResults: (nextResults) => {
+                    if (!controller.signal.aborted) {
+                        setResults(nextResults);
+                    }
+                },
             });
             if (controller.signal.aborted) return;
             setResults(response.results);
