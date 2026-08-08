@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { View, ActivityIndicator, Text, Pressable } from 'react-native';
+import { View, ActivityIndicator, Text, Pressable, Platform } from 'react-native';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { useSocketStatus, useRealtimeStatus } from '@/sync/storage';
 import { useVisibleSessionListViewData } from '@/hooks/useVisibleSessionListViewData';
@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Typography } from '@/constants/Typography';
 import { t } from '@/text';
 import { isUsingCustomServer } from '@/sync/serverConfig';
+import { getDefaultHomeTab } from '@/utils/sidebarPanel';
 
 interface MainViewProps {
     variant: 'phone' | 'sidebar';
@@ -221,7 +222,7 @@ export const MainView = React.memo(({ variant }: MainViewProps) => {
 
     // Tab state management
     // NOTE: Zen tab removed - the feature never got to a useful state
-    const [activeTab, setActiveTab] = React.useState<TabType>('sessions');
+    const [activeTab, setActiveTab] = React.useState<TabType>(() => getDefaultHomeTab(Platform.OS));
 
     const handleNewSession = React.useCallback(() => {
         router.navigate('/new');

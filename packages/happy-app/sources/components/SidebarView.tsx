@@ -11,8 +11,8 @@ import { StyleSheet } from 'react-native-unistyles';
 import { t } from '@/text';
 import { Ionicons } from '@expo/vector-icons';
 import { Typography } from '@/constants/Typography';
-import { useAllSessions, useUnreadSessionIds } from '@/sync/storage';
-import { formatSidebarUnreadCount, SIDEBAR_PANELS, type SidebarPanel } from '@/utils/sidebarPanel';
+import { useAllSessions, useLocalSettingMutable, useUnreadSessionIds } from '@/sync/storage';
+import { formatSidebarUnreadCount, SIDEBAR_PANELS } from '@/utils/sidebarPanel';
 import { isMacTauri } from '@/utils/isTauri';
 
 const stylesheet = StyleSheet.create((theme) => ({
@@ -120,7 +120,7 @@ export const SidebarView = React.memo(() => {
     const realtimeStatus = useRealtimeStatus();
     const sessions = useAllSessions();
     const unreadSessionIds = useUnreadSessionIds();
-    const [activePanel, setActivePanel] = React.useState<SidebarPanel>('sessions');
+    const [activePanel, setActivePanel] = useLocalSettingMutable('sidebarPanel');
 
     const unreadCount = React.useMemo(
         () => sessions.reduce(
