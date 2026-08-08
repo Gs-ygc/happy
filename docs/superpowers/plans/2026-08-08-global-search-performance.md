@@ -46,4 +46,4 @@
 - [x] Skip loaded latest pages using `sessionOldestSeq` and `hasMoreOlder`.
 - [x] Run remote session scans with concurrency `4`, page-level result callbacks, aggregate progress, cancellation, and the global result cap.
 - [x] Update the global search screen to render `onResults` snapshots during the active scan.
-- [ ] Bump Android `versionCode` to `167` and run focused tests, full App tests, typecheck, Web smoke, local Gradle build, and GitHub Release verification.
+- [x] Bump Android `versionCode` to `167` and run focused tests, full App tests, typecheck, Web smoke, local Gradle build, and GitHub Release verification.
