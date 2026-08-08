@@ -3,6 +3,7 @@ import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { Typography } from '@/constants/Typography';
 import { t } from '@/text';
 import {
     storage,
@@ -36,7 +37,7 @@ const STATUS_CONFIG: Record<TaskRunState, { color: string; isPulsing: boolean }>
     running: { color: '#34C759', isPulsing: false },
 };
 const PENDING_COLOR = '#FF9F0A';
-const ALL_SECTION_COLLAPSE_KEY = '__task_center_all__';
+type TaskCenterSegment = 'running' | 'all';
 
 function getStatusText(state: TaskRunState): string {
     switch (state) {
@@ -50,9 +51,7 @@ function getStatusText(state: TaskRunState): string {
 }
 
 type Row =
-    | { kind: 'running-header'; count: number }
     | { kind: 'empty-running' }
-    | { kind: 'all-header'; count: number }
     | { kind: 'group-header'; group: TaskProjectGroup }
     | { kind: 'pending-header'; count: number }
     | { kind: 'task'; item: TaskItem };
@@ -145,13 +144,24 @@ const TaskRow = React.memo(({ item, name, onPress, onSubmitDraft }: {
     item: TaskItem;
     name: string;
     onPress: () => void;
-    onSubmitDraft?: (item: TaskItem) => void;
+    onSubmitDraft?: (item: TaskItem) => Promise<void>;
 }) => {
     const { theme } = useUnistyles();
     const showActionAlert = useSessionActionAlert(item.sessionId);
     const [pinnedIds, setPinnedIds] = useLocalSettingMutable('pinnedSessionIds');
     const [archiving, setArchiving] = React.useState(false);
+    const [submittingDraft, setSubmittingDraft] = React.useState(false);
     const isPinned = pinnedIds.includes(item.sessionId);
+
+    const submitDraft = React.useCallback(async () => {
+        if (!onSubmitDraft || submittingDraft) return;
+        setSubmittingDraft(true);
+        try {
+            await onSubmitDraft(item);
+        } finally {
+            setSubmittingDraft(false);
+        }
+    }, [item, onSubmitDraft, submittingDraft]);
 
     const togglePin = React.useCallback(() => {
         if (isPinned) {
@@ -249,15 +259,18 @@ const TaskRow = React.memo(({ item, name, onPress, onSubmitDraft }: {
                 ) : null}
             </View>
             <View style={styles.rowActions}>
-                {item.hasPendingInput && onSubmitDraft ? (
+                {item.hasPendingInput && item.state !== 'running' && onSubmitDraft ? (
                     <Pressable
-                        onPress={() => onSubmitDraft(item)}
+                        onPress={submitDraft}
+                        disabled={submittingDraft}
                         hitSlop={8}
                         accessibilityRole="button"
                         accessibilityLabel={t('taskCenter.forceSubmit')}
-                        style={({ pressed }) => [styles.iconButton, pressed && { backgroundColor: theme.colors.surfacePressed }]}
+                        style={({ pressed }) => [styles.iconButton, submittingDraft && { opacity: 0.5 }, pressed && { backgroundColor: theme.colors.surfacePressed }]}
                     >
-                        <Ionicons name="send" size={16} color={PENDING_COLOR} />
+                        {submittingDraft
+                            ? <ActivityIndicator size="small" color={PENDING_COLOR} />
+                            : <Ionicons name="send" size={16} color={PENDING_COLOR} />}
                     </Pressable>
                 ) : null}
                 <Pressable
@@ -301,6 +314,7 @@ export function TaskCenterView() {
     const unreadSessionIds = useUnreadSessionIds();
     const pinnedSessionIds = useLocalSetting('pinnedSessionIds');
     const [collapsedKeys, setCollapsedKeys] = useLocalSettingMutable('collapsedTaskProjectKeys');
+    const [segment, setSegment] = React.useState<TaskCenterSegment>('running');
     const navigateToSession = useNavigateToSession();
 
     const machinesById = React.useMemo(() => {
@@ -318,31 +332,29 @@ export function TaskCenterView() {
         [sessions, machinesById, pinnedSessionIds, unreadSessionIds],
     );
 
-    const forceSubmitDraft = React.useCallback((item: TaskItem) => {
+    const forceSubmitDraft = React.useCallback(async (item: TaskItem) => {
         const draft = item.draft;
         if (!draft?.trim()) return;
-        void (async () => {
-            try {
-                // Interrupt the running turn first so the draft is processed
-                // immediately instead of waiting for the agent to finish.
-                const session = storage.getState().sessions[item.sessionId];
-                const isWorking = !!session && (
-                    session.thinking
-                    || (session.agentState?.requests && Object.keys(session.agentState.requests).length > 0)
-                );
-                if (isWorking) {
-                    try {
-                        await sessionAbort(item.sessionId);
-                    } catch (error) {
-                        console.log('Force submit: abort unavailable, sending anyway:', error);
-                    }
+        try {
+            // Interrupt the running turn first so the draft is processed
+            // immediately instead of waiting for the agent to finish.
+            const session = storage.getState().sessions[item.sessionId];
+            const isWorking = !!session && (
+                session.thinking
+                || (session.agentState?.requests && Object.keys(session.agentState.requests).length > 0)
+            );
+            if (isWorking) {
+                try {
+                    await sessionAbort(item.sessionId);
+                } catch (error) {
+                    console.log('Force submit: abort unavailable, sending anyway:', error);
                 }
-                await sync.sendMessage(item.sessionId, draft, { source: 'chat' });
-                storage.getState().updateSessionDraft(item.sessionId, null);
-            } catch (error) {
-                console.error('Force submit failed:', error);
             }
-        })();
+            await sync.sendMessage(item.sessionId, draft, { source: 'chat' });
+            storage.getState().updateSessionDraft(item.sessionId, null);
+        } catch (error) {
+            console.error('Force submit failed:', error);
+        }
     }, []);
 
     const toggleGroup = React.useCallback((key: string) => {
@@ -353,24 +365,28 @@ export function TaskCenterView() {
         );
     }, [collapsedKeys, setCollapsedKeys]);
 
-    const allCollapsed = collapsedKeys.includes(ALL_SECTION_COLLAPSE_KEY);
     const clearAllUnread = React.useCallback(() => {
         storage.getState().markAllSessionsRead();
     }, []);
 
     const rows = React.useMemo(() => {
         const list: Row[] = [];
-        list.push({ kind: 'running-header', count: data.runningCount });
-        if (data.running.length === 0) {
-            list.push({ kind: 'empty-running' });
-        }
-        for (const item of data.running) {
-            list.push({ kind: 'task', item });
-        }
-        list.push({ kind: 'all-header', count: data.projects.reduce((n, group) => n + group.items.length, 0) });
-        if (!allCollapsed) {
+        if (segment === 'running') {
+            if (data.running.length === 0) {
+                list.push({ kind: 'empty-running' });
+            }
+            for (const item of data.running) {
+                list.push({ kind: 'task', item });
+            }
+            if (data.pending.length > 0) {
+                list.push({ kind: 'pending-header', count: data.pendingCount });
+                for (const item of data.pending) {
+                    list.push({ kind: 'task', item });
+                }
+            }
+        } else {
             const collapsed = new Set(collapsedKeys);
-            for (const group of data.projects) {
+            for (const group of data.allProjects) {
                 // Keep the header visible when collapsed so the group can always
                 // be expanded again. Only its task rows are hidden.
                 list.push({ kind: 'group-header', group });
@@ -381,20 +397,12 @@ export function TaskCenterView() {
                 }
             }
         }
-        if (data.pending.length > 0) {
-            list.push({ kind: 'pending-header', count: data.pendingCount });
-            for (const item of data.pending) {
-                list.push({ kind: 'task', item });
-            }
-        }
         return list;
-    }, [data, collapsedKeys, allCollapsed]);
+    }, [data, collapsedKeys, segment]);
 
     const keyExtractor = React.useCallback((row: Row) => {
         switch (row.kind) {
-            case 'running-header': return 'running-header';
             case 'empty-running': return 'empty-running';
-            case 'all-header': return 'all-header';
             case 'group-header': return 'group-' + row.group.key;
             case 'pending-header': return 'pending-header';
             case 'task': return 'task-' + row.item.sessionId;
@@ -403,26 +411,8 @@ export function TaskCenterView() {
 
     const renderItem = React.useCallback(({ item }: { item: Row }) => {
         switch (item.kind) {
-            case 'running-header':
-                return (
-                    <SectionHeader
-                        title={t('taskCenter.running')}
-                        count={item.count}
-                        onAction={unreadSessionIds.size > 0 ? clearAllUnread : undefined}
-                        actionLabel={unreadSessionIds.size > 0 ? t('taskCenter.markAllRead') : undefined}
-                    />
-                );
             case 'empty-running':
                 return <Text style={styles.emptyRunningText}>{t('taskCenter.noRunning')}</Text>;
-            case 'all-header':
-                return (
-                    <SectionHeader
-                        title={t('taskCenter.all')}
-                        count={item.count}
-                        collapsed={allCollapsed}
-                        onToggle={() => toggleGroup(ALL_SECTION_COLLAPSE_KEY)}
-                    />
-                );
             case 'group-header':
                 return (
                     <GroupHeader
@@ -445,7 +435,7 @@ export function TaskCenterView() {
                 );
             }
         }
-    }, [allCollapsed, clearAllUnread, collapsedKeys, toggleGroup, sessionById, navigateToSession, unreadSessionIds.size]);
+    }, [collapsedKeys, toggleGroup, sessionById, navigateToSession]);
 
     if (!sessionsReady) {
         return <View style={styles.container} />;
@@ -463,6 +453,25 @@ export function TaskCenterView() {
 
     return (
         <View style={styles.container}>
+            <View style={styles.segmentToolbar}>
+                <View style={styles.segmentControl} accessibilityRole="tablist">
+                    {(['running', 'all'] as const).map((key) => {
+                        const selected = segment === key;
+                        const count = key === 'running' ? data.runningCount + data.pendingCount : data.totalCount;
+                        return (
+                            <Pressable key={key} onPress={() => setSegment(key)} accessibilityRole="tab" accessibilityState={{ selected }} style={({ pressed }) => [styles.segmentButton, selected && styles.segmentButtonSelected, pressed && { opacity: 0.75 }]}>
+                                <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>{key === 'running' ? t('taskCenter.running') : t('taskCenter.all')}</Text>
+                                <Text style={[styles.segmentCount, selected && styles.segmentCountSelected]}>{count}</Text>
+                            </Pressable>
+                        );
+                    })}
+                </View>
+                {unreadSessionIds.size > 0 ? (
+                    <Pressable onPress={clearAllUnread} accessibilityRole="button" accessibilityLabel={t('taskCenter.markAllRead')} hitSlop={8} style={styles.toolbarAction}>
+                        <Ionicons name="checkmark-done-outline" size={20} color={theme.colors.textLink} />
+                    </Pressable>
+                ) : null}
+            </View>
             <FlatList
                 data={rows}
                 renderItem={renderItem}
@@ -488,8 +497,17 @@ const styles = StyleSheet.create((theme) => ({
         width: '100%',
         alignSelf: 'center',
         paddingHorizontal: 16,
-        paddingTop: 8,
+        paddingTop: 4,
     },
+    segmentToolbar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingTop: 10, maxWidth: layout.maxWidth, width: '100%', alignSelf: 'center' },
+    segmentControl: { flex: 1, flexDirection: 'row', padding: 3, borderRadius: 9, backgroundColor: theme.colors.surfaceHigh, gap: 3 },
+    segmentButton: { flex: 1, minHeight: 34, paddingHorizontal: 8, borderRadius: 7, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+    segmentButtonSelected: { backgroundColor: theme.colors.surface },
+    segmentText: { color: theme.colors.textSecondary, fontSize: 13, ...Typography.default() },
+    segmentTextSelected: { color: theme.colors.text, ...Typography.default('semiBold') },
+    segmentCount: { color: theme.colors.textSecondary, fontSize: 11, ...Typography.default('semiBold') },
+    segmentCountSelected: { color: theme.colors.textLink },
+    toolbarAction: { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.surfaceHigh },
     sectionHeader: {
         flexDirection: 'row',
         alignItems: 'center',

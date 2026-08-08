@@ -19,6 +19,11 @@ interface MouseNavigationEvent {
     button: number;
 }
 
+interface GlobalSearchKeyboardEvent extends KeyboardNavigationEvent {
+    repeat: boolean;
+    target: { tagName?: string; isContentEditable?: boolean } | null;
+}
+
 export function createRouteHistory(pathname: string): RouteHistoryState {
     return {
         stack: [pathname],
@@ -95,4 +100,14 @@ export function getMouseNavigationDirection(event: MouseNavigationEvent): Browse
     if (event.button === 3) return 'back';
     if (event.button === 4) return 'forward';
     return null;
+}
+
+export function shouldOpenGlobalSearch(event: GlobalSearchKeyboardEvent): boolean {
+    if (event.defaultPrevented || event.repeat || event.key !== '/') return false;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+    const target = event.target;
+    if (!target) return true;
+    if (target.isContentEditable) return false;
+    const tagName = target.tagName?.toUpperCase();
+    return tagName !== 'INPUT' && tagName !== 'TEXTAREA' && tagName !== 'SELECT';
 }

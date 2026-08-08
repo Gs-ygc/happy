@@ -49,6 +49,9 @@ export interface TaskCenterData {
     running: TaskItem[];
     /** Sessions with unsubmitted user input; pinned at the very bottom. */
     pending: TaskItem[];
+    /** Every session grouped for the All segment. */
+    allProjects: TaskProjectGroup[];
+    /** Non-running sessions retained for callers that need the old partition. */
     projects: TaskProjectGroup[];
     runningCount: number;
     pendingCount: number;
@@ -201,47 +204,53 @@ export function buildTaskCenterData(
         }
     }
 
-    // Active work state keeps thinking/permission sessions above idle running
-    // sessions, then in-progress goals, then by recent activity.
+    // Goal-mode work is always first. Within each goal tier, active work stays
+    // ahead of idle-but-recent/unread sessions, then recency breaks ties.
     running.sort((a, b) => {
-        const aWorking = a.state === 'running' ? 0 : 1;
-        const bWorking = b.state === 'running' ? 0 : 1;
-        if (aWorking !== bWorking) return bWorking - aWorking;
         const aGoal = a.goal?.status === 'active' ? 1 : 0;
         const bGoal = b.goal?.status === 'active' ? 1 : 0;
         if (aGoal !== bGoal) return bGoal - aGoal;
+        const aWorking = a.state === 'running' ? 0 : 1;
+        const bWorking = b.state === 'running' ? 0 : 1;
+        if (aWorking !== bWorking) return bWorking - aWorking;
         return b.updatedAt - a.updatedAt;
     });
     pending.sort((a, b) => b.updatedAt - a.updatedAt);
 
-    const groupMap = new Map<string, TaskProjectGroup>();
-    for (const item of remaining) {
-        const key = item.path ? item.machineId + ':' + item.path : OTHER_PROJECT_KEY;
-        let group = groupMap.get(key);
-        if (!group) {
-            group = {
-                key,
-                displayPath: item.path ?? '',
-                machineName: item.machineName ?? '',
-                items: [],
-            };
-            groupMap.set(key, group);
+    const groupItems = (items: readonly TaskItem[]): TaskProjectGroup[] => {
+        const groupMap = new Map<string, TaskProjectGroup>();
+        for (const item of items) {
+            const key = item.path ? item.machineId + ':' + item.path : OTHER_PROJECT_KEY;
+            let group = groupMap.get(key);
+            if (!group) {
+                group = {
+                    key,
+                    displayPath: item.path ?? '',
+                    machineName: item.machineName ?? '',
+                    items: [],
+                };
+                groupMap.set(key, group);
+            }
+            group.items.push(item);
         }
-        group.items.push(item);
-    }
+        const groups = Array.from(groupMap.values());
+        for (const group of groups) {
+            group.items.sort((a, b) => b.updatedAt - a.updatedAt);
+        }
+        groups.sort((a, b) => {
+            const activityDelta = (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0);
+            return activityDelta || a.displayPath.localeCompare(b.displayPath);
+        });
+        return groups;
+    };
 
-    const projects = Array.from(groupMap.values());
-    for (const group of projects) {
-        group.items.sort((a, b) => b.updatedAt - a.updatedAt);
-    }
-    projects.sort((a, b) => {
-        const activityDelta = (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0);
-        return activityDelta || a.displayPath.localeCompare(b.displayPath);
-    });
+    const projects = groupItems(remaining);
+    const allProjects = groupItems([...running, ...pending, ...remaining]);
 
     return {
         running,
         pending,
+        allProjects,
         projects,
         runningCount: running.length,
         pendingCount: pending.length,

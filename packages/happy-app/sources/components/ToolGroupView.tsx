@@ -19,6 +19,8 @@ import { Message, ToolCallMessage } from '@/sync/typesMessage';
 import { getToolSummaryCategory, getToolSummaryDetail, isTerminalToolName, ToolSummaryCategory } from '@/utils/toolDisplay';
 import { useRouter } from 'expo-router';
 import { formatMCPTitle } from './tools/views/MCPToolView';
+import { projectAgentActivities } from '@/utils/agentActivity';
+import { Typography } from '@/constants/Typography';
 
 interface ToolGroupViewProps {
     group: ToolGroupItem;
@@ -320,6 +322,8 @@ function ToolSummaryRow(props: {
     const category = getToolSummaryCategory(tool.name);
     const detail = getToolSummaryDetail(tool);
     const title = getToolRowTitle(category, tool.name);
+    const activity = React.useMemo(() => projectAgentActivities([props.message])[0], [props.message]);
+    const duration = activity.durationMs !== undefined ? formatWorkDuration(activity.durationMs) : null;
     const filePath = isFileEditTool(tool.name) && typeof tool.input?.file_path === 'string'
         ? tool.input.file_path
         : null;
@@ -347,6 +351,16 @@ function ToolSummaryRow(props: {
                     </Text>
                 </View>
             ) : null}
+            {duration ? <Text style={styles.toolSummaryDuration}>{duration}</Text> : null}
+            {activity.status === 'running' ? (
+                <ActivityIndicator size="small" color={theme.colors.textSecondary} style={{ transform: [{ scaleX: 0.7 }, { scaleY: 0.7 }] }} />
+            ) : activity.status === 'waiting' ? (
+                <Ionicons name="hand-left-outline" size={13} color="#FF9500" />
+            ) : activity.status === 'error' ? (
+                <Ionicons name="alert-circle-outline" size={13} color={theme.colors.status.error} />
+            ) : (
+                <Ionicons name="checkmark-circle-outline" size={13} color={theme.colors.textSecondary} />
+            )}
         </>
     );
 
@@ -361,6 +375,8 @@ function ToolSummaryRow(props: {
     return (
         <Pressable
             onPress={handlePress}
+            accessibilityRole="button"
+            accessibilityLabel={`${title}${detail ? `: ${detail}` : ''}`}
             style={({ pressed }) => [
                 styles.toolSummaryRow,
                 pressed && styles.toolSummaryRowPressed,
@@ -525,5 +541,11 @@ const styles = StyleSheet.create((theme) => ({
         lineHeight: 16,
         color: theme.colors.textSecondary,
         fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+    },
+    toolSummaryDuration: {
+        flexShrink: 0,
+        color: theme.colors.textSecondary,
+        fontSize: 11,
+        ...Typography.default(),
     },
 }));

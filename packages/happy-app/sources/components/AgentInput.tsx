@@ -55,6 +55,8 @@ interface AgentInputProps {
     onEffortLevelChange?: (level: EffortLevel) => void;
     metadata?: Metadata | null;
     onAbort?: () => void | Promise<void>;
+    onForceSend?: () => void | Promise<void>;
+    isForceSending?: boolean;
     showAbortButton?: boolean;
     connectionStatus?: {
         text: string;
@@ -845,6 +847,12 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         }
     }, [handleBlockedSendAttempt, hasImages, isSendBlocked, props.isSendDisabled, props.isSending, props.onSend, props.onMicPress]);
 
+    const handleForceSendPress = React.useCallback(() => {
+        if (!props.onForceSend || props.isForceSending || (!hasText && !hasImages)) return;
+        hapticsLight();
+        void props.onForceSend();
+    }, [hasImages, hasText, props.isForceSending, props.onForceSend]);
+
     // Handle keyboard navigation
     const handleKeyPress = React.useCallback((event: KeyPressEvent): boolean => {
         // Handle autocomplete navigation first
@@ -1416,6 +1424,23 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                     </Pressable>
                                 )}
                                 </View>}
+
+                                {isSendBlocked && (hasText || hasImages) && props.onForceSend ? (
+                                    <View style={[styles.sendButton, styles.sendButtonActive]}>
+                                        <Pressable
+                                            style={(p) => ({ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', opacity: p.pressed ? 0.7 : 1 })}
+                                            hitSlop={{ top: 5, bottom: 10, left: 0, right: 0 }}
+                                            onPress={handleForceSendPress}
+                                            disabled={props.isForceSending}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={t('taskCenter.forceSubmit')}
+                                        >
+                                            {props.isForceSending
+                                                ? <ActivityIndicator size="small" color={theme.colors.button.primary.tint} />
+                                                : <Ionicons name="flash" size={16} color={theme.colors.button.primary.tint} />}
+                                        </Pressable>
+                                    </View>
+                                ) : null}
 
                                 {/* Send/Voice button - aligned with first row */}
                                 <View

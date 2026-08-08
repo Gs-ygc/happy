@@ -185,7 +185,7 @@ describe('buildTaskCenterData', () => {
         expect(data.running.map((item) => item.sessionId)).toEqual(['think-old', 'perm-old', 'run-new']);
     });
 
-    it('prioritizes active work state over an active goal on a running session', () => {
+    it('prioritizes an active goal over ordinary thinking work', () => {
         const thinking = sessionWith({ id: 'think-old', updatedAt: Date.now() - 5000, thinking: true });
         const goal = sessionWith({
             id: 'goal-new',
@@ -202,7 +202,7 @@ describe('buildTaskCenterData', () => {
         });
         const data = buildTaskCenterData([goal, thinking], noMachines, []);
 
-        expect(data.running.map((item) => item.sessionId)).toEqual(['think-old', 'goal-new']);
+        expect(data.running.map((item) => item.sessionId)).toEqual(['goal-new', 'think-old']);
     });
 
     it('keeps online-but-idle sessions out of running and marks them online', () => {
@@ -264,6 +264,17 @@ describe('buildTaskCenterData', () => {
         expect(data.projects.map((group) => group.displayPath)).toEqual(['/tmp/zed', '/tmp/alpha']);
         const zed = data.projects[0];
         expect(zed.items.map((item) => item.sessionId)).toEqual(['c1', 'a1']);
+    });
+
+    it('includes running, pending, and inactive sessions in the all-project groups', () => {
+        const running = sessionWith({ id: 'run-all', updatedAt: Date.now() - 1000 });
+        const pending = sessionWith({ id: 'draft-all', draft: 'send this', updatedAt: Date.now() - 2000 });
+        const inactive = sessionWith({ id: 'idle-all', active: false, presence: 1, updatedAt: Date.now() - 3000 });
+
+        const data = buildTaskCenterData([inactive, pending, running], noMachines, []);
+
+        expect(data.allProjects.flatMap((group) => group.items.map((item) => item.sessionId)))
+            .toEqual(['run-all', 'draft-all', 'idle-all']);
     });
 
     it('puts sessions without a path into the "other" bucket', () => {

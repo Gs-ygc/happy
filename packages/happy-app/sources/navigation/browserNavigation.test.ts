@@ -5,6 +5,7 @@ import {
     createRouteHistory,
     getKeyboardNavigationDirection,
     getMouseNavigationDirection,
+    shouldOpenGlobalSearch,
 } from './browserNavigation';
 
 describe('browser navigation shortcuts', () => {
@@ -90,5 +91,18 @@ describe('browser navigation shortcuts', () => {
             metaKey: true,
             shiftKey: false,
         })).toBeNull();
+    });
+
+    test('slash opens global search only outside editable controls', () => {
+        const event = {
+            key: '/', defaultPrevented: false, repeat: false,
+            altKey: false, ctrlKey: false, metaKey: false, shiftKey: false,
+            target: { tagName: 'DIV', isContentEditable: false },
+        };
+        expect(shouldOpenGlobalSearch(event)).toBe(true);
+        expect(shouldOpenGlobalSearch({ ...event, target: { tagName: 'INPUT', isContentEditable: false } })).toBe(false);
+        expect(shouldOpenGlobalSearch({ ...event, target: { tagName: 'DIV', isContentEditable: true } })).toBe(false);
+        expect(shouldOpenGlobalSearch({ ...event, ctrlKey: true })).toBe(false);
+        expect(shouldOpenGlobalSearch({ ...event, repeat: true })).toBe(false);
     });
 });

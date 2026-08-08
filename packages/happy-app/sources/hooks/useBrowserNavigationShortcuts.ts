@@ -6,6 +6,7 @@ import {
     getNavigatorCanGoBack,
     getKeyboardNavigationDirection,
     getMouseNavigationDirection,
+    shouldOpenGlobalSearch,
 } from '@/navigation/browserNavigation';
 import { useBrowserNavigationStore } from '@/navigation/browserNavigationStore';
 import { storage } from '@/sync/storage';
@@ -76,6 +77,12 @@ export function useBrowserNavigationShortcuts() {
         }
 
         const onKeyDown = (event: KeyboardEvent) => {
+            if (shouldOpenGlobalSearch(event as KeyboardEvent & { target: HTMLElement | null })) {
+                event.preventDefault();
+                event.stopPropagation();
+                router.navigate('/session/search');
+                return;
+            }
             if (getKeyboardNavigationDirection(event) !== 'back') {
                 return;
             }

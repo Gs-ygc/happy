@@ -72,6 +72,7 @@ import {
     rigCanUseShell,
 } from '@/sync/rig';
 import { RigActivityBar } from '@/components/RigActivityBar';
+import { isSessionTurnBusy } from '@/utils/composerSubmission';
 
 export const SessionView = React.memo((props: { id: string }) => {
     const sessionId = props.id;
@@ -560,6 +561,8 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
     // clear it without subscribing to it (which would re-render the whole
     // SessionViewLoaded tree on every keystroke).
     const composerHandleRef = React.useRef<ChatComposerHandle | null>(null);
+    const [isForceSending, setIsForceSending] = React.useState(false);
+    const isTurnBusy = isSessionTurnBusy(session);
 
     // Handle dismissing CLI version warning
     const handleDismissCliWarning = React.useCallback(() => {
@@ -621,8 +624,28 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
         if (!isRig) {
             sessionSetAgentModes(sessionId, { permissionMode: null, modelMode: null, effortLevel: null });
         }
-        sessionAbort(sessionId);
+        return sessionAbort(sessionId);
     }, [sessionId, isRig]);
+
+    const handleForceSend = React.useCallback(async () => {
+        if (isForceSending) return;
+        const liveMessage = composerHandleRef.current?.getMessage() ?? '';
+        if (!liveMessage.trim() && !(expImageUpload && selectedImages.length > 0)) return;
+
+        setIsForceSending(true);
+        try {
+            await sessionAbort(sessionId);
+            const attachments = expImageUpload ? selectedImages : undefined;
+            await sync.sendMessage(sessionId, liveMessage, { source: 'chat', attachments });
+            composerHandleRef.current?.clearMessage();
+            if (expImageUpload) clearImages();
+        } catch (error) {
+            console.error('Force submit failed:', error);
+            Modal.alert(t('common.error'), t('errors.operationFailed'));
+        } finally {
+            setIsForceSending(false);
+        }
+    }, [clearImages, expImageUpload, isForceSending, selectedImages, sessionId]);
 
     const handleFileViewerPress = React.useCallback(() => {
         router.push(`/session/${sessionId}/files`);
@@ -791,8 +814,10 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
             onEffortLevelChange={isRigReasoningSelectionEnabled(session.metadata) ? updateEffortLevel : undefined}
             metadata={session.metadata}
             connectionStatus={connectionStatus}
-            blockSend={isRig && session.thinking && session.metadata?.capabilities?.steering !== true}
+            blockSend={isTurnBusy}
             onSend={handleSend}
+            onForceSend={isTurnBusy ? handleForceSend : undefined}
+            isForceSending={isForceSending}
             onMicPress={isDisconnected ? undefined : micButtonState.onMicPress}
             isMicActive={isDisconnected ? false : micButtonState.isMicActive}
             onAbort={isDisconnected || !rigCanAbort(session.metadata) ? undefined : handleAbort}
