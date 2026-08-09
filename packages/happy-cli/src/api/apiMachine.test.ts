@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiMachineClient } from './apiMachine';
 import type { Machine } from './types';
+import { encodeBase64, encrypt } from './encryption';
 
 const {
     mockIo,
@@ -173,6 +174,52 @@ describe('ApiMachineClient socket reconnection', () => {
         aliveCalls = mockSocket.emit.mock.calls.filter(([event]: [string]) => event === 'machine-alive');
         expect(aliveCalls).toHaveLength(2);
 
+        client.shutdown();
+    });
+
+    it('ignores stale machine metadata updates after applying a newer policy', async () => {
+        const machine = makeMachine();
+        const client = new ApiMachineClient('fake-token', machine);
+        const onMetadataUpdate = vi.fn();
+        client.setRPCHandlers({
+            spawnSession: vi.fn(),
+            stopSession: vi.fn(),
+            requestShutdown: vi.fn(),
+            onMetadataUpdate,
+        });
+        client.connect();
+
+        const updatedMetadata = { ...machine.metadata, host: 'updated-host' };
+        emitSocketEvent('update', {
+            id: 'newer-update',
+            seq: 1,
+            createdAt: Date.now(),
+            body: {
+                t: 'update-machine',
+                machineId: machine.id,
+                metadata: {
+                    version: 1,
+                    value: encodeBase64(encrypt(machine.encryptionKey, machine.encryptionVariant, updatedMetadata)),
+                },
+            },
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        emitSocketEvent('update', {
+            id: 'stale-update',
+            seq: 2,
+            createdAt: Date.now(),
+            body: {
+                t: 'update-machine',
+                machineId: machine.id,
+                metadata: { version: 0, value: 'not-used-for-stale-update' },
+            },
+        });
+
+        expect(machine.metadata.host).toBe('updated-host');
+        expect(machine.metadataVersion).toBe(1);
+        expect(onMetadataUpdate).toHaveBeenCalledTimes(1);
         client.shutdown();
     });
 });

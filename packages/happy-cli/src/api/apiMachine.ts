@@ -126,6 +126,7 @@ export class ApiMachineClient {
     private reconnectInterval: NodeJS.Timeout | null = null;
     private codexOperationManager: CodexDeviceOperationManager | null = null;
     private metadataUpdateHandler: ((metadata: MachineMetadata) => Promise<void> | void) | null = null;
+    private metadataApplyQueue: Promise<void> = Promise.resolve();
 
     constructor(
         private token: string,
@@ -506,13 +507,18 @@ export class ApiMachineClient {
                 const update = data.body as UpdateMachineBody;
 
                 if (update.metadata) {
-                    logger.debug('[API MACHINE] Received external metadata update');
-                    this.machine.metadata = decrypt(this.machine.encryptionKey, this.machine.encryptionVariant, decodeBase64(update.metadata.value));
-                    this.machine.metadataVersion = update.metadata.version;
-                    if (this.machine.metadata && this.metadataUpdateHandler) {
-                        void Promise.resolve(this.metadataUpdateHandler(this.machine.metadata)).catch((error) => {
-                            logger.warn('[API MACHINE] Failed to apply external machine metadata', error);
-                        });
+                    if (update.metadata.version <= this.machine.metadataVersion) {
+                        logger.debug(`[API MACHINE] Ignored stale machine metadata update ${update.metadata.version}`);
+                    } else {
+                        logger.debug('[API MACHINE] Received external metadata update');
+                        const metadata = decrypt(this.machine.encryptionKey, this.machine.encryptionVariant, decodeBase64(update.metadata.value));
+                        this.machine.metadata = metadata;
+                        this.machine.metadataVersion = update.metadata.version;
+                        if (this.machine.metadata && this.metadataUpdateHandler) {
+                            this.metadataApplyQueue = this.metadataApplyQueue
+                                .then(() => this.metadataUpdateHandler?.(metadata))
+                                .catch((error) => logger.warn('[API MACHINE] Failed to apply external machine metadata', error));
+                        }
                     }
                 }
 

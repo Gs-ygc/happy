@@ -17,6 +17,7 @@ export function detectCodexInstallKind(executablePath: string): CodexInstallKind
     if (normalized.includes('/pnpm/') || normalized.includes('/.pnpm/')) return 'pnpm';
     if (normalized.includes('/.bun/') || normalized.includes('/bun/')) return 'bun';
     if (normalized.includes('/node_modules/@openai/codex/')) return 'npm';
+    if (normalized.endsWith('/codex.cmd') && normalized.includes('/npm/')) return 'npm';
     return 'unknown';
 }
 

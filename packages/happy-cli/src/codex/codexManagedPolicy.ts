@@ -1,7 +1,7 @@
-import { chmod, cp, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdir, readdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import {
     CodexPolicyAssignmentSchema,
@@ -26,7 +26,7 @@ export function resolveCodexHome(environment: NodeJS.ProcessEnv = process.env): 
     if (configured.startsWith('~/') || configured.startsWith('~\\')) {
         return join(homedir(), configured.slice(2));
     }
-    return configured;
+    return resolve(configured);
 }
 
 export async function readCodexManagedPolicy(path: string): Promise<CodexPolicyAssignment | null> {
@@ -138,7 +138,19 @@ export async function materializeGitCodexSkill(
     await execFileAsync('git', ['-C', staging, 'fetch', '--depth', '1', 'origin', revision], { timeout: 10 * 60 * 1000 });
     await execFileAsync('git', ['-C', staging, 'checkout', '--quiet', 'FETCH_HEAD'], { timeout: 60 * 1000 });
     const source = subdirectory ? join(staging, subdirectory) : staging;
+    await assertNoSymbolicLinks(source);
     await rm(destination, { recursive: true, force: true });
-    await cp(source, destination, { recursive: true, dereference: true });
+    await cp(source, destination, { recursive: true, dereference: false });
     await rm(staging, { recursive: true, force: true });
+}
+
+export async function assertNoSymbolicLinks(directory: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        const stat = await lstat(path);
+        if (stat.isSymbolicLink()) {
+            throw new Error(`Managed Git skill contains a symbolic link: ${entry.name}`);
+        }
+        if (stat.isDirectory()) await assertNoSymbolicLinks(path);
+    }
 }

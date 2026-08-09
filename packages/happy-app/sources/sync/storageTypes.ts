@@ -310,6 +310,7 @@ export const MachineMetadataSchema = z.object({
     platform: z.string(),
     happyCliVersion: z.string(),
     happyHomeDir: z.string(), // Directory for Happy auth, settings, logs (usually .happy/ or .happy-dev/)
+    happyLibDir: z.string().optional(), // CLI installation directory (newer daemon metadata)
     homeDir: z.string(), // User's home directory (matches CLI field name)
     // Optional fields that may be added in future versions
     username: z.string().optional(),

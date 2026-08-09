@@ -42,7 +42,9 @@ export const CodexOperationSnapshotSchema = z.object({
 export type CodexOperationSnapshot = z.infer<typeof CodexOperationSnapshotSchema>;
 
 const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const SENSITIVE_KEY = /(?:token|api[_-]?key|secret|password)/i;
+const SENSITIVE_KEY = /(?:token|api[_-]?key|secret|password|authorization|credential)/i;
+const ABSOLUTE_PATH = /^(?:\/|[A-Za-z]:[\\/])/;
+const SENSITIVE_VALUE = /(?:bearer\s+|token\s*[=:]|api[_-]?key\s*[=:]|secret\s*[=:]|password\s*[=:])/i;
 
 export const CodexMcpServerSchema = z.object({
     name: z.string().regex(SAFE_IDENTIFIER),
@@ -59,13 +61,18 @@ export const CodexMcpServerSchema = z.object({
             ctx.addIssue({ code: 'custom', message: `${key} must use secretEnv`, path: ['plainEnv', key] });
         }
     }
+    for (const [key, value] of Object.entries(server.plainEnv)) {
+        if (SENSITIVE_VALUE.test(value)) {
+            ctx.addIssue({ code: 'custom', message: `${key} must not contain credentials`, path: ['plainEnv', key] });
+        }
+    }
 });
 export type CodexMcpServer = z.infer<typeof CodexMcpServerSchema>;
 
 export const CodexManagedSkillSourceSchema = z.discriminatedUnion('kind', [
     z.object({
         kind: z.literal('local'),
-        path: z.string().trim().min(1).max(4096),
+        path: z.string().trim().min(1).max(4096).regex(ABSOLUTE_PATH, 'Local skill path must be absolute'),
     }).strict(),
     z.object({
         kind: z.literal('git'),
@@ -90,9 +97,12 @@ export const CodexManagedSkillSchema = z.object({
 export type CodexManagedSkill = z.infer<typeof CodexManagedSkillSchema>;
 
 function findSensitiveConfigPath(value: unknown, path: Array<string | number> = [], depth = 0): Array<string | number> | null {
-    if (!value || typeof value !== 'object' || depth > 20) return null;
+    if (!value || typeof value !== 'object' || depth > 100) return null;
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
         if (SENSITIVE_KEY.test(key) && typeof child === 'string' && child.length > 0) return [...path, key];
+        if (typeof child === 'string' && SENSITIVE_VALUE.test(child)) {
+            return [...path, key];
+        }
         const nested = findSensitiveConfigPath(child, [...path, key], depth + 1);
         if (nested) return nested;
     }
@@ -109,6 +119,13 @@ export const CodexDevicePolicySchema = z.object({
     if (sensitivePath) {
         ctx.addIssue({ code: 'custom', message: 'Secrets must be referenced from the target environment', path: ['baseConfig', ...sensitivePath] });
     }
+    for (const [serverIndex, server] of policy.mcpServers.entries()) {
+        for (const [argIndex, arg] of server.args.entries()) {
+            if (SENSITIVE_VALUE.test(arg)) {
+                ctx.addIssue({ code: 'custom', message: 'MCP command arguments must not contain credentials', path: ['mcpServers', serverIndex, 'args', argIndex] });
+            }
+        }
+    }
 });
 export type CodexDevicePolicy = z.infer<typeof CodexDevicePolicySchema>;
 
@@ -116,6 +133,7 @@ export const CodexDeviceGroupSchema = z.object({
     id: z.string().regex(SAFE_IDENTIFIER),
     name: z.string().trim().min(1).max(100),
     machineIds: z.array(z.string().trim().min(1).max(128)).max(500),
+    membershipRevision: z.number().int().nonnegative().default(0),
     policy: CodexDevicePolicySchema,
 }).strict();
 export type CodexDeviceGroup = z.infer<typeof CodexDeviceGroupSchema>;

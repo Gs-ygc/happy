@@ -11,6 +11,7 @@ describe('settings', () => {
         }];
         expect(settingsParse({ codexDeviceGroups }).codexDeviceGroups).toEqual([{
             ...codexDeviceGroups[0],
+            membershipRevision: 0,
             policy: { revision: 1, baseConfig: {}, mcpServers: [], skills: [] },
         }]);
     });

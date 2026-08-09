@@ -183,7 +183,13 @@ export default function MachineDetailScreen() {
         let snapshot = initial;
         for (let attempt = 0; attempt < 400 && (snapshot.state === 'queued' || snapshot.state === 'running'); attempt++) {
             await new Promise((resolve) => setTimeout(resolve, 1500));
-            snapshot = await machineCodexOperationStatus(machineId, snapshot.operationId) ?? snapshot;
+            const next = await machineCodexOperationStatus(machineId, snapshot.operationId);
+            snapshot = next ?? {
+                ...snapshot,
+                state: 'failed',
+                error: 'The device no longer has this operation. It may have restarted before completing it.',
+                updatedAt: Date.now(),
+            };
             setCodexOperation(snapshot);
         }
         if (snapshot.result) setCodexStatus(snapshot.result);
@@ -233,8 +239,8 @@ export default function MachineDetailScreen() {
     };
 
     const persistCodexGroups = async (groups: CodexDeviceGroup[], affectedMachineIds: string[]) => {
-        sync.applySettings({ codexDeviceGroups: groups });
-        const results = await Promise.allSettled(affectedMachineIds.map(async (affectedMachineId) => {
+        const previousGroups = storage.getState().settings.codexDeviceGroups;
+        const applyAssignments = (targetGroups: CodexDeviceGroup[], machineIds: string[]) => Promise.allSettled(machineIds.map(async (affectedMachineId) => {
             const target = allMachines.find((candidate) => candidate.id === affectedMachineId);
             if (!target?.metadata) throw new Error(`Machine metadata unavailable: ${affectedMachineId}`);
             await machinePatchMetadata(
@@ -244,8 +250,16 @@ export default function MachineDetailScreen() {
                 target.metadataVersion,
             );
         }));
+        const results = await applyAssignments(groups, affectedMachineIds);
         const failed = results.filter((result) => result.status === 'rejected');
-        if (failed.length > 0) throw new Error(`Policy saved, but ${failed.length} device update(s) failed`);
+        if (failed.length > 0) {
+            const successfulMachineIds = affectedMachineIds.filter((_, index) => results[index]?.status === 'fulfilled');
+            const rollback = await applyAssignments(previousGroups, successfulMachineIds);
+            const rollbackFailed = rollback.filter((result) => result.status === 'rejected').length;
+            const suffix = rollbackFailed > 0 ? `; rollback also failed on ${rollbackFailed} device(s), so retry the update` : '';
+            throw new Error(`Policy was not saved because ${failed.length} device update(s) failed${suffix}`);
+        }
+        sync.applySettings({ codexDeviceGroups: groups });
     };
 
     const assignCodexGroup = async (groupId: string | null) => {
@@ -269,6 +283,7 @@ export default function MachineDetailScreen() {
             id: `group-${sync.encryption.generateId()}`,
             name: name.trim(),
             machineIds: [],
+            membershipRevision: 0,
             policy: { revision: 1, baseConfig: {}, mcpServers: [], skills: [] },
         };
         const withGroup = upsertCodexDeviceGroup(settings.codexDeviceGroups, group);
@@ -291,7 +306,9 @@ export default function MachineDetailScreen() {
                 onSave: async (updated: CodexDeviceGroup) => {
                     const latestGroups = storage.getState().settings.codexDeviceGroups;
                     const latest = latestGroups.find((candidate) => candidate.id === group.id);
-                    if (!latest || latest.policy.revision !== group.policy.revision) {
+                    if (!latest
+                        || latest.policy.revision !== group.policy.revision
+                        || latest.membershipRevision !== group.membershipRevision) {
                         throw new Error('This group changed on another client. Close and reopen the editor.');
                     }
                     const next = upsertCodexDeviceGroup(latestGroups, updated);

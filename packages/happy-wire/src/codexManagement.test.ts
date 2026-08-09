@@ -100,5 +100,17 @@ describe('Codex device policy schemas', () => {
                 mcpServers: [{ name: 'github', command: 'server', plainEnv: { GITHUB_TOKEN: 'secret-value' } }],
             },
         })).toThrow();
+        expect(() => CodexPolicyAssignmentSchema.parse({
+            groupId: 'a', groupName: 'A',
+            policy: { revision: 1, baseConfig: { headers: { Authorization: 'Bearer secret-value' } } },
+        })).toThrow();
+        expect(() => CodexPolicyAssignmentSchema.parse({
+            groupId: 'a', groupName: 'A',
+            policy: { revision: 1, mcpServers: [{ name: 'github', command: 'server', args: ['--api-key=secret-value'] }] },
+        })).toThrow();
+        expect(() => CodexPolicyAssignmentSchema.parse({
+            groupId: 'a', groupName: 'A',
+            policy: { revision: 1, mcpServers: [{ name: 'github', command: 'server', plainEnv: { UPSTREAM: 'Bearer secret-value' } }] },
+        })).toThrow();
     });
 });

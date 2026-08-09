@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CodexPolicyAssignmentSchema } from '@slopus/happy-wire';
-import { applyCodexManagedPolicy, buildCodexManagedRuntime, materializeCodexManagedSkills, readCodexManagedPolicy, writeCodexManagedPolicy } from './codexManagedPolicy';
+import { applyCodexManagedPolicy, assertNoSymbolicLinks, buildCodexManagedRuntime, materializeCodexManagedSkills, readCodexManagedPolicy, writeCodexManagedPolicy } from './codexManagedPolicy';
 
 describe('Codex managed policy', () => {
     it('writes and reads an encrypted-device metadata snapshot atomically', async () => {
@@ -73,5 +73,11 @@ describe('Codex managed policy', () => {
 
         expect(await readCodexManagedPolicy(path)).toEqual(previous);
         expect(calls).toBe(2);
+    });
+
+    it('rejects symbolic links before copying a Git-provided skill', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'happy-codex-symlink-'));
+        await symlink('/etc/passwd', join(root, 'outside'));
+        await expect(assertNoSymbolicLinks(root)).rejects.toThrow('symbolic link');
     });
 });

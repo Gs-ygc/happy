@@ -483,6 +483,7 @@ export async function startDaemon(): Promise<void> {
               startedBy: 'daemon',
               pid: tmuxResult.pid, // Real PID from tmux -P flag
               tmuxSessionId: tmuxResult.sessionId,
+              spawnEnv: tmuxEnv,
               directoryCreated,
               message: directoryCreated
                 ? `The path '${directory}' did not exist. We created a new folder and spawned a new session in tmux session '${tmuxSessionName}'. Use 'tmux attach -t ${tmuxSessionName}' to view the session.`
@@ -499,6 +500,8 @@ export async function startDaemon(): Promise<void> {
               // Set timeout for webhook (same as regular flow)
               const timeout = setTimeout(() => {
                 pidToAwaiter.delete(tmuxResult.pid!);
+                try { process.kill(tmuxResult.pid!, 'SIGTERM'); } catch { /* session may already be gone */ }
+                pidToTrackedSession.delete(tmuxResult.pid!);
                 logger.debug(`[DAEMON RUN] Session webhook timeout for PID ${tmuxResult.pid} (tmux)`);
                 resolve({
                   type: 'error',
@@ -630,6 +633,7 @@ export async function startDaemon(): Promise<void> {
         startedBy: 'daemon',
         pid: happyProcess.pid,
         childProcess: happyProcess,
+        spawnEnv: env,
         directoryCreated,
         message,
       };
@@ -655,6 +659,8 @@ export async function startDaemon(): Promise<void> {
       return new Promise((resolve) => {
         const timeout = setTimeout(() => {
           pidToAwaiter.delete(happyProcess.pid!);
+          try { happyProcess.kill('SIGTERM'); } catch { /* process may already be gone */ }
+          pidToTrackedSession.delete(happyProcess.pid!);
           logger.debug(`[DAEMON RUN] Session webhook timeout for PID ${happyProcess.pid}`);
           resolve({
             type: 'error',
@@ -748,7 +754,7 @@ export async function startDaemon(): Promise<void> {
           args: launch.args,
           cwd: launch.cwd,
           env: {
-            ...process.env,
+            ...(tracked.spawnEnv ?? process.env),
             HAPPY_RECONNECT_SESSION_ID: happySessionId,
             HAPPY_RECONNECT_ENCRYPTION_KEY: encodeBase64(tracked.encryption.encryptionKey),
             HAPPY_RECONNECT_ENCRYPTION_VARIANT: tracked.encryption.encryptionVariant,
@@ -782,6 +788,7 @@ export async function startDaemon(): Promise<void> {
               logger.debug(`[DAEMON RUN] Sent SIGTERM to daemon-spawned session ${sessionId}`);
             } catch (error) {
               logger.debug(`[DAEMON RUN] Failed to kill session ${sessionId}:`, error);
+              return false;
             }
           } else {
             // For externally started sessions, try to kill by PID
@@ -790,6 +797,7 @@ export async function startDaemon(): Promise<void> {
               logger.debug(`[DAEMON RUN] Sent SIGTERM to external session PID ${pid}`);
             } catch (error) {
               logger.debug(`[DAEMON RUN] Failed to kill external session PID ${pid}:`, error);
+              if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false;
             }
           }
 
@@ -808,7 +816,20 @@ export async function startDaemon(): Promise<void> {
 
     const waitForSessionExit = async (session: TrackedSession, timeoutMs = 10_000): Promise<boolean> => {
       const child = session.childProcess;
-      if (!child || child.exitCode !== null || child.signalCode !== null) return true;
+      if (!child) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          try {
+            process.kill(session.pid, 0);
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
+            return false;
+          }
+        }
+        return false;
+      }
+      if (child.exitCode !== null || child.signalCode !== null) return true;
       return new Promise<boolean>((resolve) => {
         const timer = setTimeout(() => resolve(false), timeoutMs);
         timer.unref();
@@ -929,7 +950,9 @@ export async function startDaemon(): Promise<void> {
       logger.debug(`[DAEMON RUN] Applied Codex policy revision ${assignment?.policy.revision ?? 'none'}`);
     };
     if (machine.metadataVersion > 0 || machine.metadata.codexPolicyAssignment !== undefined) {
-      await applyCodexPolicy(machine.metadata);
+      await applyCodexPolicy(machine.metadata).catch((error) => {
+        logger.warn('[DAEMON RUN] Codex policy could not be applied at startup; continuing with the last known local policy', error);
+      });
     } else {
       logger.debug('[DAEMON RUN] Preserving local Codex policy while machine metadata is unavailable offline');
     }

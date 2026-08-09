@@ -13,12 +13,14 @@ export function assignMachineToCodexDeviceGroup(
     if (groupId !== null && !groups.some((group) => group.id === groupId)) {
         throw new Error('Codex device group not found');
     }
-    return CodexDeviceGroupsSchema.parse(groups.map((group) => ({
-        ...group,
-        machineIds: group.id === groupId
+    return CodexDeviceGroupsSchema.parse(groups.map((group) => {
+        const machineIds = group.id === groupId
             ? Array.from(new Set([...group.machineIds.filter((id) => id !== machineId), machineId]))
-            : group.machineIds.filter((id) => id !== machineId),
-    })));
+            : group.machineIds.filter((id) => id !== machineId);
+        return machineIds.length === group.machineIds.length && machineIds.every((id, index) => id === group.machineIds[index])
+            ? group
+            : { ...group, machineIds, membershipRevision: (group.membershipRevision ?? 0) + 1 };
+    }));
 }
 
 export function resolveCodexPolicyAssignment(

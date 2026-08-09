@@ -11,6 +11,7 @@ describe('Codex device runtime helpers', () => {
         expect(detectCodexInstallKind('/usr/local/lib/node_modules/@openai/codex/bin/codex.js')).toBe('npm');
         expect(detectCodexInstallKind('/home/user/.local/share/pnpm/global/5/node_modules/@openai/codex/bin/codex.js')).toBe('pnpm');
         expect(detectCodexInstallKind('/opt/homebrew/Caskroom/codex/1.0/bin/codex')).toBe('homebrew');
+        expect(detectCodexInstallKind('C:\\Users\\user\\AppData\\Roaming\\npm\\codex.cmd')).toBe('npm');
         expect(detectCodexInstallKind('/tmp/codex')).toBe('unknown');
     });
 });

@@ -23,6 +23,8 @@ export interface TrackedSession {
   encryption?: SessionEncryptionData;
   pid: number;
   childProcess?: ChildProcess;
+  /** In-memory only. Never persisted because it may contain auth secrets. */
+  spawnEnv?: NodeJS.ProcessEnv;
   error?: string;
   directoryCreated?: boolean;
   message?: string;

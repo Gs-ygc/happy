@@ -8,14 +8,16 @@ import {
 
 describe('Codex device groups', () => {
     const groups = [
-        { id: 'dev', name: 'Development', machineIds: ['machine-1'], policy: { revision: 1, baseConfig: {}, mcpServers: [], skills: [] } },
-        { id: 'prod', name: 'Production', machineIds: [], policy: { revision: 2, baseConfig: {}, mcpServers: [], skills: [] } },
+        { id: 'dev', name: 'Development', machineIds: ['machine-1'], membershipRevision: 0, policy: { revision: 1, baseConfig: {}, mcpServers: [], skills: [] } },
+        { id: 'prod', name: 'Production', machineIds: [], membershipRevision: 0, policy: { revision: 2, baseConfig: {}, mcpServers: [], skills: [] } },
     ];
 
     it('moves a machine between groups instead of assigning it twice', () => {
         const next = assignMachineToCodexDeviceGroup(groups, 'machine-1', 'prod');
         expect(next.find((group) => group.id === 'dev')?.machineIds).toEqual([]);
         expect(next.find((group) => group.id === 'prod')?.machineIds).toEqual(['machine-1']);
+        expect(next.find((group) => group.id === 'dev')?.membershipRevision).toBe(1);
+        expect(next.find((group) => group.id === 'prod')?.membershipRevision).toBe(1);
     });
 
     it('resolves the policy snapshot sent to one device', () => {
