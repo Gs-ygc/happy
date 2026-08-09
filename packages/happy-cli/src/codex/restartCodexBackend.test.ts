@@ -80,6 +80,7 @@ describe('restartCodexBackend', () => {
                 aborted: true,
                 forcedRestart: true,
                 resumedThread: true,
+                resumedThreadId: 'thread-resumed-by-abort',
             }),
             reconnectAndResumeThread: vi.fn(),
         };

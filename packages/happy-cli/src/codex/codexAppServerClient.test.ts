@@ -354,6 +354,7 @@ describe('CodexAppServerClient sandbox integration', () => {
             aborted: true,
             forcedRestart: true,
             resumedThread: true,
+            resumedThreadId: 'thread-1',
         });
         expect(events).toContainEqual(expect.objectContaining({
             type: 'turn_aborted',
@@ -421,6 +422,31 @@ describe('CodexAppServerClient sandbox integration', () => {
         expect(client.threadId).toBeNull();
         expect(client.hasActiveThread()).toBe(false);
         expect(proc2.kill).toHaveBeenCalledWith('SIGTERM');
+    });
+
+    it('clears stale thread state when replacement connection fails before spawn', async () => {
+        const proc1 = createMockProcess({
+            pid: 2053,
+            onRequest: (msg, stdout) => {
+                if (msg.method === 'thread/start' && msg.id != null) {
+                    setTimeout(() => pushJsonLine(stdout, {
+                        id: msg.id,
+                        result: { thread: { id: 'thread-before-connect-failure', path: '/tmp/thread' }, model: 'gpt-test' },
+                    }), 0);
+                }
+            },
+        });
+        mockSpawn.mockImplementationOnce(() => proc1);
+
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient();
+        await client.connect();
+        await client.startThread({ cwd: '/tmp/project' });
+        vi.spyOn(client, 'connect').mockRejectedValue(new Error('codex binary disappeared'));
+
+        await expect(client.reconnectAndResumeThread()).resolves.toBeNull();
+        expect(client.threadId).toBeNull();
+        expect(client.hasActiveThread()).toBe(false);
     });
 
     it('force-restarts promptly when turn interrupt RPC does not respond', async () => {
@@ -521,6 +547,7 @@ describe('CodexAppServerClient sandbox integration', () => {
             aborted: true,
             forcedRestart: true,
             resumedThread: true,
+            resumedThreadId: 'thread-stuck-interrupt',
         });
         expect(secondProcessRequests.some((msg) => msg.method === 'thread/resume')).toBe(true);
 

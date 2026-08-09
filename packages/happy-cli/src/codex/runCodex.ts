@@ -430,6 +430,10 @@ export async function runCodex(opts: {
     session.onUserMessage(handleUserMessage);
     let thinking = false;
     let currentTurnId: string | null = null;
+    // A failed forced restart clears the active client/session metadata so it
+    // cannot be mistaken for a live provider thread. Keep the original ID
+    // privately long enough to recover on the next user turn.
+    let recoverableCodexThreadId: string | null = null;
     let codexStartedSubagents = new Set<string>();
     let codexActiveSubagents = new Set<string>();
     let codexProviderSubagentToSessionSubagent = new Map<string, string>();
@@ -507,11 +511,23 @@ export async function runCodex(opts: {
                 // Request interruption, then force-restart Codex app-server if
                 // it doesn't settle quickly (long-running shell commands).
                 if (client) {
+                    const previousThreadId = client.threadId;
                     const abortResult = await client.abortTurnWithFallback({
                         gracePeriodMs: 3000,
                         forceRestartOnTimeout: true,
                     });
                     if (abortResult.forcedRestart) {
+                        if (abortResult.resumedThreadId) {
+                            recoverableCodexThreadId = null;
+                            session.updateMetadata((currentMetadata) => (
+                                markCodexRestartSucceeded(currentMetadata, abortResult.resumedThreadId!)
+                            ));
+                        } else {
+                            recoverableCodexThreadId = previousThreadId ?? null;
+                            session.updateMetadata((currentMetadata) => (
+                                markCodexRestartFailed(currentMetadata)
+                            ));
+                        }
                         logger.warn('[Codex] Forced app-server restart after interrupt timeout');
                         session.sendSessionEvent({
                             type: 'message',
@@ -548,10 +564,12 @@ export async function runCodex(opts: {
             session.keepAlive(false, 'remote');
 
             let result: RestartCodexBackendResult;
+            const previousThreadId = client.threadId;
             try {
                 result = await restartCodexBackend(client);
             } catch (error) {
                 currentTurnId = null;
+                recoverableCodexThreadId = previousThreadId ?? null;
                 session.updateMetadata((currentMetadata) => (
                     markCodexRestartFailed(currentMetadata)
                 ));
@@ -563,6 +581,7 @@ export async function runCodex(opts: {
             }
 
             currentTurnId = null;
+            recoverableCodexThreadId = null;
             session.updateMetadata((currentMetadata) => (
                 markCodexRestartSucceeded(currentMetadata, result.threadId)
             ));
@@ -1130,6 +1149,23 @@ export async function runCodex(opts: {
                 activeTurnPermissionMode = message.mode.permissionMode;
 
                 // Start thread on first turn (thread persists across mode changes)
+                if (!client.isConnected()) {
+                    await client.connect();
+                    if (recoverableCodexThreadId) {
+                        try {
+                            const recovered = await client.resumeThread({ threadId: recoverableCodexThreadId });
+                            recoverableCodexThreadId = null;
+                            session.updateMetadata((currentMetadata) => (
+                                markCodexRestartSucceeded(currentMetadata, recovered.threadId)
+                            ));
+                        } catch (recoveryError) {
+                            logger.warn('[Codex] Failed to recover the previous thread; starting a new one', recoveryError);
+                            recoverableCodexThreadId = null;
+                            client.clearThreadState();
+                        }
+                    }
+                }
+
                 let activeThreadId = client.threadId;
                 if (!client.hasActiveThread() || !activeThreadId) {
                     const startedThread = await client.startThread({

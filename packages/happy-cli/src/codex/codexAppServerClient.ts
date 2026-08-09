@@ -66,6 +66,7 @@ type AbortTurnWithFallbackResult = {
     aborted: boolean;
     forcedRestart: boolean;
     resumedThread: boolean;
+    resumedThreadId?: string | null;
 };
 
 type LegacyPatchChanges = Record<string, Record<string, unknown>>;
@@ -1094,6 +1095,12 @@ export class CodexAppServerClient {
             return resumedThread.threadId;
         } catch (error) {
             logger.warn('[CodexAppServer] Failed to resume thread after reconnect', error);
+            // `connect()` can fail before it installs a replacement process,
+            // in which case disconnectInternal's transport guard would leave
+            // the preserved thread defaults untouched. A failed reconnect is
+            // never resumable through this client instance.
+            this._threadId = null;
+            this.threadDefaults = null;
             await this.disconnectInternal();
             return null;
         }
@@ -1221,6 +1228,7 @@ export class CodexAppServerClient {
             aborted: true,
             forcedRestart: true,
             resumedThread: resumedThreadId !== null,
+            resumedThreadId,
         };
     }
 
@@ -1371,6 +1379,10 @@ export class CodexAppServerClient {
     }
 
     // ─── State queries ──────────────────────────────────────────
+
+    isConnected(): boolean {
+        return this.connected && this.process !== null;
+    }
 
     hasActiveThread(): boolean {
         return this._threadId !== null;
