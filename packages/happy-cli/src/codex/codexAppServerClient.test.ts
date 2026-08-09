@@ -378,6 +378,51 @@ describe('CodexAppServerClient sandbox integration', () => {
         await client.disconnect();
     });
 
+    it('clears stale thread state and disconnects when reconnect cannot resume', async () => {
+        const proc1 = createMockProcess({
+            pid: 2051,
+            onRequest: (msg, stdout) => {
+                if (msg.method === 'thread/start' && msg.id != null) {
+                    setTimeout(() => {
+                        pushJsonLine(stdout, {
+                            id: msg.id,
+                            result: {
+                                thread: { id: 'thread-stale', path: '/tmp/thread-stale' },
+                                model: 'gpt-test',
+                            },
+                        });
+                    }, 0);
+                }
+            },
+        });
+        const proc2 = createMockProcess({
+            pid: 2052,
+            onRequest: (msg, stdout) => {
+                if (msg.method === 'thread/resume' && msg.id != null) {
+                    setTimeout(() => {
+                        pushJsonLine(stdout, {
+                            id: msg.id,
+                            error: { code: -32000, message: 'thread not found' },
+                        });
+                    }, 0);
+                }
+            },
+        });
+        mockSpawn
+            .mockImplementationOnce(() => proc1)
+            .mockImplementationOnce(() => proc2);
+
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient();
+        await client.connect();
+        await client.startThread({ cwd: '/tmp/project' });
+
+        await expect(client.reconnectAndResumeThread()).resolves.toBeNull();
+        expect(client.threadId).toBeNull();
+        expect(client.hasActiveThread()).toBe(false);
+        expect(proc2.kill).toHaveBeenCalledWith('SIGTERM');
+    });
+
     it('force-restarts promptly when turn interrupt RPC does not respond', async () => {
         const firstProcessRequests: MockRpcMessage[] = [];
         const secondProcessRequests: MockRpcMessage[] = [];

@@ -1079,23 +1079,23 @@ export class CodexAppServerClient {
         return await this.request('thread/goal/clear', params) as ThreadGoalClearResponse;
     }
 
-    async reconnectAndResumeThread(): Promise<boolean> {
+    async reconnectAndResumeThread(): Promise<string | null> {
         const threadId = this._threadId;
         await this.disconnectInternal({ preserveThreadState: !!threadId });
-        await this.connect();
-
-        if (!threadId) {
-            return false;
-        }
 
         try {
-            await this.resumeThread({ threadId });
-            return true;
+            await this.connect();
+            if (!threadId) {
+                await this.disconnectInternal();
+                return null;
+            }
+
+            const resumedThread = await this.resumeThread({ threadId });
+            return resumedThread.threadId;
         } catch (error) {
             logger.warn('[CodexAppServer] Failed to resume thread after reconnect', error);
-            this._threadId = null;
-            this.threadDefaults = null;
-            return false;
+            await this.disconnectInternal();
+            return null;
         }
     }
 
@@ -1215,8 +1215,13 @@ export class CodexAppServerClient {
                 forced_restart: true,
             });
         }
-        const resumedThread = await this.reconnectAndResumeThread();
-        return { hadActiveTurn: true, aborted: true, forcedRestart: true, resumedThread };
+        const resumedThreadId = await this.reconnectAndResumeThread();
+        return {
+            hadActiveTurn: true,
+            aborted: true,
+            forcedRestart: true,
+            resumedThread: resumedThreadId !== null,
+        };
     }
 
     /**

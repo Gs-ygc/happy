@@ -37,7 +37,13 @@ import {
     ensureCodexTurnForSessionEnvelopes,
 } from './utils/sessionProtocolMapper';
 import { resumeExistingThread } from './resumeExistingThread';
-import { restartCodexBackend, type RestartCodexBackendResult } from './restartCodexBackend';
+import {
+    CodexSessionLifecycleCoordinator,
+    markCodexRestartFailed,
+    markCodexRestartSucceeded,
+    restartCodexBackend,
+    type RestartCodexBackendResult,
+} from './restartCodexBackend';
 import { emitReadyIfIdle } from './emitReadyIfIdle';
 import { enqueueCodexUserText, isCodexClearText } from './codexClearCommand';
 import { interruptTurnForIncomingMessage } from './codexTurnInterrupt';
@@ -226,8 +232,7 @@ export async function runCodex(opts: {
     let permissionHandler: CodexPermissionHandler;
     let client!: CodexAppServerClient;
     let reasoningProcessor!: ReasoningProcessor;
-    let abortInProgress: Promise<void> | null = null;
-    let restartInProgress: Promise<RestartCodexBackendResult> | null = null;
+    const lifecycleCoordinator = new CodexSessionLifecycleCoordinator();
     const { session: initialSession, reconnectionHandle } = setupOfflineReconnection({
         api,
         sessionTag,
@@ -491,22 +496,8 @@ export async function runCodex(opts: {
      * happening but keeps the session alive for new prompts.
      */
     async function handleAbort() {
-        if (restartInProgress) {
-            try {
-                await restartInProgress;
-            } catch {
-                // The restart RPC reports its own failure to the caller.
-            }
-            return;
-        }
-
-        if (abortInProgress) {
-            await abortInProgress;
-            return;
-        }
-
-        logger.debug('[Codex] Abort requested - stopping current task');
-        abortInProgress = (async () => {
+        await lifecycleCoordinator.runAbort(async () => {
+            logger.debug('[Codex] Abort requested - stopping current task');
             try {
                 // Resolve any pending permission requests as 'abort' first.
                 if (permissionHandler) {
@@ -543,22 +534,11 @@ export async function runCodex(opts: {
                 abortController.abort();
                 abortController = new AbortController();
             }
-        })();
-
-        await abortInProgress;
-        abortInProgress = null;
+        });
     }
 
     async function handleRestartCodex(): Promise<RestartCodexBackendResult> {
-        if (restartInProgress) {
-            return await restartInProgress;
-        }
-
-        const operation = (async () => {
-            if (abortInProgress) {
-                await abortInProgress;
-            }
-
+        return await lifecycleCoordinator.runRestart(async () => {
             logger.debug('[Codex] Backend restart requested');
             permissionHandler.abortAll();
             reasoningProcessor.abort();
@@ -567,13 +547,25 @@ export async function runCodex(opts: {
             thinking = false;
             session.keepAlive(false, 'remote');
 
-            const result = await restartCodexBackend(client);
+            let result: RestartCodexBackendResult;
+            try {
+                result = await restartCodexBackend(client);
+            } catch (error) {
+                currentTurnId = null;
+                session.updateMetadata((currentMetadata) => (
+                    markCodexRestartFailed(currentMetadata)
+                ));
+                session.sendSessionEvent({
+                    type: 'message',
+                    message: error instanceof Error ? error.message : 'Codex backend restart failed.',
+                });
+                throw error;
+            }
 
             currentTurnId = null;
-            session.updateMetadata((currentMetadata) => ({
-                ...currentMetadata,
-                codexThreadId: result.threadId,
-            }));
+            session.updateMetadata((currentMetadata) => (
+                markCodexRestartSucceeded(currentMetadata, result.threadId)
+            ));
             messageBuffer.addMessage(`Restarted Codex thread ${trimIdent(result.threadId)}`, 'status');
             session.sendSessionEvent({
                 type: 'message',
@@ -581,16 +573,7 @@ export async function runCodex(opts: {
             });
             logger.debug(`[Codex] Backend restarted; resumed thread ${result.threadId}`);
             return result;
-        })();
-
-        restartInProgress = operation;
-        try {
-            return await operation;
-        } finally {
-            if (restartInProgress === operation) {
-                restartInProgress = null;
-            }
-        }
+        });
     }
 
     /**
@@ -1069,13 +1052,11 @@ export async function runCodex(opts: {
         let pending: { message: string; mode: EnhancedMode; isolate: boolean; hash: string; attachments?: PendingAttachment[] } | null = null;
 
         while (!shouldExit) {
-            if (restartInProgress) {
-                try {
-                    await restartInProgress;
-                } catch {
-                    // Keep the Happy session alive so the user can retry or send
-                    // a new message after the RPC caller receives the error.
-                }
+            try {
+                await lifecycleCoordinator.waitForRestart();
+            } catch {
+                // Keep the Happy session alive so the user can retry or send
+                // a new message after the RPC caller receives the error.
             }
             logActiveHandles('loop-top');
             let message: { message: string; mode: EnhancedMode; isolate: boolean; hash: string; attachments?: PendingAttachment[] } | null = pending;
@@ -1199,9 +1180,7 @@ export async function runCodex(opts: {
 
                 // A restart can begin while attachments are being prepared.
                 // Do not send the turn until thread/resume has finished.
-                if (restartInProgress) {
-                    await restartInProgress;
-                }
+                await lifecycleCoordinator.waitForRestart();
 
                 const result = await client.sendTurnAndWait(turnPrompt, {
                     model: message.mode.model,
