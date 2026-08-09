@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { useSession } from '@/sync/storage';
 import { DuplicateSheet } from '@/components/DuplicateSheet';
 import { isRigMetadata } from '@/sync/rig';
+import { claimForkAction } from '@/utils/forkActionGate';
 
 export interface SessionActionItem {
     id: string;
@@ -299,11 +300,18 @@ export function useSessionQuickActions(
         if (!forkSource) {
             throw new HappyError(t('session.forkErrorMissingMetadata'), false);
         }
-        const result = await forkAndSpawn(forkSource as ForkSource);
-        if (result.type !== 'success') {
-            throw new HappyError(result.type === 'error' ? result.errorMessage : t('session.forkErrorGeneric'), false);
+        const claim = claimForkAction();
+        try {
+            const result = await forkAndSpawn(forkSource as ForkSource);
+            if (result.type !== 'success') {
+                throw new HappyError(result.type === 'error' ? result.errorMessage : t('session.forkErrorGeneric'), false);
+            }
+            if (claim.isCurrent()) {
+                navigateToSession(result.sessionId);
+            }
+        } finally {
+            claim.release();
         }
-        navigateToSession(result.sessionId);
     });
 
     const forkSession = React.useCallback(() => {

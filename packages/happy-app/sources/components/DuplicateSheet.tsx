@@ -14,6 +14,8 @@ import {
     type ForkSource,
 } from '@/sync/ops';
 import { getSessionForkSource } from '@/utils/sessionFork';
+import { claimForkAction } from '@/utils/forkActionGate';
+import { selectUniqueRewindPointByText } from '@/utils/duplicateSelection';
 
 export interface DuplicateSheetProps {
     sessionId: string;
@@ -65,6 +67,11 @@ export const DuplicateSheet = React.memo(function DuplicateSheet(props: Duplicat
     const [pointsError, setPointsError] = React.useState<string | null>(null);
     const initialSelectedId = initialRewindPointId ?? initialClaudeUuid ?? null;
     const [selectedId, setSelectedId] = React.useState<string | null>(initialSelectedId);
+    const mountedRef = React.useRef(true);
+
+    React.useEffect(() => () => {
+        mountedRef.current = false;
+    }, []);
 
     React.useEffect(() => {
         let cancelled = false;
@@ -116,8 +123,7 @@ export const DuplicateSheet = React.memo(function DuplicateSheet(props: Duplicat
         if (!points || selectedId || !initialMessageText) {
             return;
         }
-        const target = normalizeMessageText(initialMessageText);
-        const match = points.find((point) => normalizeMessageText(point.text) === target);
+        const match = selectUniqueRewindPointByText(points, initialMessageText);
         if (match) {
             setSelectedId(match.id);
         }
@@ -137,27 +143,34 @@ export const DuplicateSheet = React.memo(function DuplicateSheet(props: Duplicat
             return;
         }
 
-        const forkedFromMessageId = matchesInitialSelection(selected, initialSelectedId, initialMessageText)
+        const claim = claimForkAction();
+        try {
+            const forkedFromMessageId = matchesInitialSelection(selected, initialSelectedId, initialMessageText, points ?? [])
             ? initialForkedFromMessageId
             : undefined;
-        const result = source.kind === 'codex'
-            ? await forkAndSpawn(source as ForkSource, {
-                cutAfterItemId: selected.id,
-                forkedFromMessageId,
-            })
-            : await forkAndSpawn(source as ForkSource, {
-                cutAfterUuid: selected.id,
-                forkedFromMessageId,
-            });
+            const result = source.kind === 'codex'
+                ? await forkAndSpawn(source as ForkSource, {
+                    cutAfterItemId: selected.id,
+                    forkedFromMessageId,
+                })
+                : await forkAndSpawn(source as ForkSource, {
+                    cutAfterUuid: selected.id,
+                    forkedFromMessageId,
+                });
 
-        if (result.type === 'success') {
-            onClose?.();
-            router.replace(`/session/${result.sessionId}`);
-            return;
+            if (result.type === 'success') {
+                if (mountedRef.current && claim.isCurrent()) {
+                    onClose?.();
+                    router.replace(`/session/${result.sessionId}`);
+                }
+                return;
+            }
+
+            const message = result.type === 'error' ? result.errorMessage : t('session.forkErrorGeneric');
+            Modal.alert(t('common.error'), message);
+        } finally {
+            claim.release();
         }
-
-        const message = result.type === 'error' ? result.errorMessage : t('session.forkErrorGeneric');
-        Modal.alert(t('common.error'), message);
     });
 
     return (
@@ -230,20 +243,19 @@ export const DuplicateSheet = React.memo(function DuplicateSheet(props: Duplicat
     );
 });
 
-function normalizeMessageText(text: string): string {
-    return text.trim().replace(/\s+/g, ' ');
-}
-
 function matchesInitialSelection(
     selected: RewindPoint,
     initialSelectedId: string | null,
     initialMessageText: string | undefined,
+    points: RewindPoint[],
 ): boolean {
     if (initialSelectedId) {
         return selected.id === initialSelectedId;
     }
-    return Boolean(initialMessageText)
-        && normalizeMessageText(selected.text) === normalizeMessageText(initialMessageText ?? '');
+    const unique = initialMessageText
+        ? selectUniqueRewindPointByText(points, initialMessageText)
+        : null;
+    return unique?.id === selected.id;
 }
 
 function formatRelativeTime(timestampMs: number): string {
