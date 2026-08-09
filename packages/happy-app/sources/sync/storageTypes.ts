@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CodexPolicyAssignmentSchema } from '@slopus/happy-wire';
 
 //
 // Agent states
@@ -334,6 +335,7 @@ export const MachineMetadataSchema = z.object({
         happyAgentAuthenticated: z.boolean(),
         detectedAt: z.number(),
     }).optional(),
+    codexPolicyAssignment: CodexPolicyAssignmentSchema.nullable().optional(),
 });
 
 export type MachineMetadata = z.infer<typeof MachineMetadataSchema>;

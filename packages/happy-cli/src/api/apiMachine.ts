@@ -23,6 +23,8 @@ import {
     ForkSourceMissingError,
 } from '@/claude/utils/claudeSessionFork';
 import { CodexAppServerClient } from '@/codex/codexAppServerClient';
+import { CodexDeviceOperationManager, type CodexDeviceOperationDependencies } from '@/codex/codexDeviceOperations';
+import type { CodexOperationRequest } from '@slopus/happy-wire';
 import {
     CodexForkRewindPointNotFoundError,
     forkCodexThread,
@@ -93,6 +95,8 @@ type MachineRpcHandlers = {
     resumeSession?: (sessionId: string, options?: { model?: string; permissionMode?: string; effortLevel?: string }) => Promise<SpawnSessionResult>;
     stopSession: (sessionId: string) => boolean;
     requestShutdown: () => void;
+    codexOperations?: CodexDeviceOperationDependencies;
+    onMetadataUpdate?: (metadata: MachineMetadata) => Promise<void> | void;
 }
 
 function requireNonEmptyString(value: unknown, name: string): string {
@@ -120,6 +124,8 @@ export class ApiMachineClient {
     private rpcHandlerManager: RpcHandlerManager;
     private resumeSessionHandler: ((sessionId: string, options?: { model?: string; permissionMode?: string; effortLevel?: string }) => Promise<SpawnSessionResult>) | null = null;
     private reconnectInterval: NodeJS.Timeout | null = null;
+    private codexOperationManager: CodexDeviceOperationManager | null = null;
+    private metadataUpdateHandler: ((metadata: MachineMetadata) => Promise<void> | void) | null = null;
 
     constructor(
         private token: string,
@@ -142,9 +148,27 @@ export class ApiMachineClient {
         spawnSession,
         resumeSession,
         stopSession,
-        requestShutdown
+        requestShutdown,
+        codexOperations,
+        onMetadataUpdate,
     }: MachineRpcHandlers) {
         this.resumeSessionHandler = resumeSession ?? null;
+        this.metadataUpdateHandler = onMetadataUpdate ?? null;
+
+        if (codexOperations) {
+            this.codexOperationManager = new CodexDeviceOperationManager(codexOperations);
+            this.rpcHandlerManager.registerHandler('codex-operation-start', async (params: CodexOperationRequest) => {
+                if (!this.codexOperationManager) throw new Error('Codex management is not available');
+                return this.codexOperationManager.start(params);
+            });
+            this.rpcHandlerManager.registerHandler('codex-operation-status', (params: { operationId?: unknown }) => {
+                if (!this.codexOperationManager) throw new Error('Codex management is not available');
+                if (typeof params?.operationId !== 'string' || params.operationId.trim().length === 0) {
+                    throw new Error('operationId is required');
+                }
+                return this.codexOperationManager.get(params.operationId);
+            });
+        }
 
         // Register spawn session handler
         this.rpcHandlerManager.registerHandler('spawn-happy-session', async (params: any) => {
@@ -485,6 +509,11 @@ export class ApiMachineClient {
                     logger.debug('[API MACHINE] Received external metadata update');
                     this.machine.metadata = decrypt(this.machine.encryptionKey, this.machine.encryptionVariant, decodeBase64(update.metadata.value));
                     this.machine.metadataVersion = update.metadata.version;
+                    if (this.machine.metadata && this.metadataUpdateHandler) {
+                        void Promise.resolve(this.metadataUpdateHandler(this.machine.metadata)).catch((error) => {
+                            logger.warn('[API MACHINE] Failed to apply external machine metadata', error);
+                        });
+                    }
                 }
 
                 if (update.daemonState) {

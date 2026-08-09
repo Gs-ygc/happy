@@ -7,6 +7,8 @@ import { apiSocket } from './apiSocket';
 import { sync } from './sync';
 import { storage } from './storage';
 import type { MachineMetadata, Metadata, SessionAgentModesPatch } from './storageTypes';
+import type { CodexOperationRequest, CodexOperationSnapshot } from '@slopus/happy-wire';
+import { mergeMachineMetadataPatch } from './machineMetadataPatch';
 import { markAgentModePushPending, clearAgentModePushPending, type AgentModeField } from './agentModesPending';
 import {
     isRigMetadata,
@@ -535,6 +537,28 @@ export async function machineBash(
     }
 }
 
+export async function machineCodexOperationStart(
+    machineId: string,
+    request: CodexOperationRequest,
+): Promise<CodexOperationSnapshot> {
+    return apiSocket.machineRPC<CodexOperationSnapshot, CodexOperationRequest>(
+        machineId,
+        'codex-operation-start',
+        request,
+    );
+}
+
+export async function machineCodexOperationStatus(
+    machineId: string,
+    operationId: string,
+): Promise<CodexOperationSnapshot | null> {
+    return apiSocket.machineRPC<CodexOperationSnapshot | null, { operationId: string }>(
+        machineId,
+        'codex-operation-status',
+        { operationId },
+    );
+}
+
 /**
  * Update machine metadata with optimistic concurrency control and automatic retry
  */
@@ -598,6 +622,40 @@ export async function machineUpdateMetadata(
     }
 
     throw new Error('Unexpected error in machineUpdateMetadata');
+}
+
+export async function machinePatchMetadata(
+    machineId: string,
+    baseMetadata: MachineMetadata,
+    patch: Partial<MachineMetadata>,
+    expectedVersion: number,
+    maxRetries: number = 3,
+): Promise<{ version: number; metadata: string }> {
+    let currentVersion = expectedVersion;
+    let currentMetadata = mergeMachineMetadataPatch(baseMetadata, patch);
+    const machineEncryption = sync.encryption.getMachineEncryption(machineId);
+    if (!machineEncryption) throw new Error(`Machine encryption not found for ${machineId}`);
+
+    for (let retry = 0; retry < maxRetries; retry++) {
+        const result = await apiSocket.emitWithAck<{
+            result: 'success' | 'version-mismatch' | 'error';
+            version?: number;
+            metadata?: string;
+            message?: string;
+        }>('machine-update-metadata', {
+            machineId,
+            metadata: await machineEncryption.encryptRaw(currentMetadata),
+            expectedVersion: currentVersion,
+        });
+        if (result.result === 'success') {
+            return { version: result.version!, metadata: result.metadata! };
+        }
+        if (result.result === 'error') throw new Error(result.message || 'Failed to update machine metadata');
+        currentVersion = result.version!;
+        const latest = await machineEncryption.decryptRaw(result.metadata!) as MachineMetadata;
+        currentMetadata = mergeMachineMetadataPatch(latest, patch);
+    }
+    throw new Error(`Failed to update after ${maxRetries} retries due to version conflicts`);
 }
 
 /**

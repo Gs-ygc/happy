@@ -28,6 +28,13 @@ import { detectCLIAvailability } from '@/utils/detectCLI';
 import { buildResumeLaunch } from '@/resume/handleResumeCommand';
 import { detectResumeSupport } from '@/resume/localHappyAgentAuth';
 import { encodeBase64, decodeBase64, decrypt } from '@/api/encryption';
+import { readCodexStatus, updateCodexCli } from '@/codex/codexDeviceRuntime';
+import { isRestartableCodexSession } from './codexSessionRestart';
+import {
+  applyCodexManagedPolicy,
+  codexManagedPolicyPath,
+  resolveCodexHome,
+} from '@/codex/codexManagedPolicy';
 
 /** Shell-escape a string for safe interpolation into tmux commands. */
 function shellescape(s: string): string {
@@ -761,7 +768,7 @@ export async function startDaemon(): Promise<void> {
     };
 
     // Stop a session by sessionId or PID fallback
-    const stopSession = (sessionId: string): boolean => {
+    const stopSession = (sessionId: string, preserveForResume = false): boolean => {
       logger.debug(`[DAEMON RUN] Attempting to stop session ${sessionId}`);
 
       // Try to find by sessionId first
@@ -786,6 +793,9 @@ export async function startDaemon(): Promise<void> {
             }
           }
 
+          if (preserveForResume && session.happySessionId && session.encryption) {
+            sessionIdToFinishedSession.set(session.happySessionId, session);
+          }
           pidToTrackedSession.delete(pid);
           logger.debug(`[DAEMON RUN] Removed session ${sessionId} from tracking`);
           return true;
@@ -794,6 +804,19 @@ export async function startDaemon(): Promise<void> {
 
       logger.debug(`[DAEMON RUN] Session ${sessionId} not found`);
       return false;
+    };
+
+    const waitForSessionExit = async (session: TrackedSession, timeoutMs = 10_000): Promise<boolean> => {
+      const child = session.childProcess;
+      if (!child || child.exitCode !== null || child.signalCode !== null) return true;
+      return new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), timeoutMs);
+        timer.unref();
+        child.once('exit', () => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      });
     };
 
     // Handle child process exit — preserve session data for resume
@@ -806,6 +829,37 @@ export async function startDaemon(): Promise<void> {
         logger.debug(`[DAEMON RUN] Removing exited process PID ${pid} from tracking`);
       }
       pidToTrackedSession.delete(pid);
+    };
+
+    const restartCodexSessions = async () => {
+      const sessions = Array.from(pidToTrackedSession.values()).filter((session) => (
+        isRestartableCodexSession(session)
+      ));
+      const restarted: string[] = [];
+      const failures: string[] = [];
+
+      for (const session of sessions) {
+        const sessionId = session.happySessionId!;
+        if (!stopSession(sessionId, true)) {
+          failures.push(`${sessionId}: could not stop`);
+          continue;
+        }
+        if (!await waitForSessionExit(session)) {
+          failures.push(`${sessionId}: process did not exit within 10 seconds`);
+          continue;
+        }
+        const result = await resumeSession(sessionId);
+        if (result.type === 'success') {
+          restarted.push(sessionId);
+        } else {
+          failures.push(`${sessionId}: ${result.type === 'error' ? result.errorMessage : 'directory approval required'}`);
+        }
+      }
+
+      if (failures.length > 0) {
+        throw new Error(`Restarted ${restarted.length} Codex session(s); ${failures.length} failed`);
+      }
+      return readCodexStatus();
     };
 
     // Start control server
@@ -866,12 +920,32 @@ export async function startDaemon(): Promise<void> {
     // Create realtime machine session
     const apiMachine = api.machineSyncClient(machine);
 
+    const applyCodexPolicy = async (metadata: MachineMetadata) => {
+      const assignment = metadata.codexPolicyAssignment ?? null;
+      await applyCodexManagedPolicy(assignment, {
+        policyPath: codexManagedPolicyPath(configuration.happyHomeDir),
+        codexHome: resolveCodexHome(),
+      });
+      logger.debug(`[DAEMON RUN] Applied Codex policy revision ${assignment?.policy.revision ?? 'none'}`);
+    };
+    if (machine.metadataVersion > 0 || machine.metadata.codexPolicyAssignment !== undefined) {
+      await applyCodexPolicy(machine.metadata);
+    } else {
+      logger.debug('[DAEMON RUN] Preserving local Codex policy while machine metadata is unavailable offline');
+    }
+
     // Set RPC handlers
     apiMachine.setRPCHandlers({
       spawnSession,
       resumeSession,
       stopSession,
-      requestShutdown: () => requestShutdown('happy-app')
+      requestShutdown: () => requestShutdown('happy-app'),
+      codexOperations: {
+        readStatus: async () => readCodexStatus(),
+        restart: restartCodexSessions,
+        update: async (targetVersion) => updateCodexCli(targetVersion),
+      },
+      onMetadataUpdate: applyCodexPolicy,
     });
 
     // Connect to server

@@ -1,0 +1,104 @@
+import { describe, expect, it } from 'vitest';
+import {
+    CodexDeviceGroupsSchema,
+    CodexPolicyAssignmentSchema,
+    CodexOperationRequestSchema,
+    CodexOperationSnapshotSchema,
+} from './codexManagement';
+
+describe('Codex management wire contract', () => {
+    it('accepts the minimal idempotent operation request', () => {
+        expect(CodexOperationRequestSchema.parse({
+            operationId: 'op-1',
+            kind: 'status',
+        })).toEqual({
+            operationId: 'op-1',
+            kind: 'status',
+        });
+    });
+
+    it('rejects operation IDs that could be used to flood the daemon cache', () => {
+        expect(() => CodexOperationRequestSchema.parse({
+            operationId: 'x'.repeat(129),
+            kind: 'status',
+        })).toThrow();
+    });
+
+    it('rejects arbitrary package specifications as update targets', () => {
+        expect(() => CodexOperationRequestSchema.parse({
+            operationId: 'op-update',
+            kind: 'update',
+            targetVersion: 'file:/tmp/untrusted-package',
+        })).toThrow();
+    });
+
+    it('preserves explicit progress and result state', () => {
+        expect(CodexOperationSnapshotSchema.parse({
+            operationId: 'op-1',
+            kind: 'update',
+            state: 'running',
+            progress: 40,
+            message: 'Updating Codex',
+            updatedAt: 123,
+        })).toMatchObject({ state: 'running', progress: 40 });
+    });
+});
+
+describe('Codex device policy schemas', () => {
+    it('accepts an account-scoped group without embedding secret values', () => {
+        const groups = CodexDeviceGroupsSchema.parse([{
+            id: 'group-dev',
+            name: 'Development',
+            machineIds: ['machine-1'],
+            policy: {
+                revision: 3,
+                baseConfig: { model_reasoning_effort: 'high' },
+                mcpServers: [{
+                    name: 'github',
+                    command: 'npx',
+                    args: ['-y', '@modelcontextprotocol/server-github'],
+                    plainEnv: { LOG_LEVEL: 'info' },
+                    secretEnv: { GITHUB_TOKEN: 'GITHUB_TOKEN' },
+                }],
+                skills: [{
+                    id: 'review',
+                    name: 'review',
+                    enabled: true,
+                    source: { kind: 'local', path: '/opt/codex-skills/review' },
+                }],
+            },
+        }]);
+
+        expect(groups[0].policy.mcpServers[0].secretEnv).toEqual({ GITHUB_TOKEN: 'GITHUB_TOKEN' });
+        expect(JSON.stringify(groups)).not.toContain('secret-value');
+    });
+
+    it('rejects duplicate machine assignments and unsafe skill names', () => {
+        expect(() => CodexDeviceGroupsSchema.parse([
+            { id: 'a', name: 'A', machineIds: ['machine-1'], policy: { revision: 1 } },
+            { id: 'b', name: 'B', machineIds: ['machine-1'], policy: { revision: 1 } },
+        ])).toThrow();
+        expect(() => CodexPolicyAssignmentSchema.parse({
+            groupId: 'a',
+            groupName: 'A',
+            policy: {
+                revision: 1,
+                skills: [{ id: '../escape', name: '../escape', enabled: true, source: { kind: 'local', path: '/tmp/x' } }],
+            },
+        })).toThrow();
+    });
+
+    it('rejects plaintext secrets in synced policy', () => {
+        expect(() => CodexPolicyAssignmentSchema.parse({
+            groupId: 'a', groupName: 'A',
+            policy: { revision: 1, baseConfig: { openai_api_key: 'secret-value' } },
+        })).toThrow();
+        expect(() => CodexPolicyAssignmentSchema.parse({
+            groupId: 'a', groupName: 'A',
+            policy: {
+                revision: 1,
+                mcpServers: [{ name: 'github', command: 'server', plainEnv: { GITHUB_TOKEN: 'secret-value' } }],
+            },
+        })).toThrow();
+    });
+});

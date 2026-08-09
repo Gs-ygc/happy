@@ -5,10 +5,10 @@ import { Item } from '@/components/Item';
 import { ItemGroup } from '@/components/ItemGroup';
 import { ItemList } from '@/components/ItemList';
 import { Typography } from '@/constants/Typography';
-import { useSessions, useAllMachines, useMachine } from '@/sync/storage';
+import { storage, useSessions, useAllMachines, useMachine, useSettings } from '@/sync/storage';
 import { Ionicons, Octicons } from '@expo/vector-icons';
 import type { Session } from '@/sync/storageTypes';
-import { machineStopDaemon, machineUpdateMetadata, machineDelete } from '@/sync/ops';
+import { machineStopDaemon, machineUpdateMetadata, machinePatchMetadata, machineDelete, machineCodexOperationStart, machineCodexOperationStatus } from '@/sync/ops';
 import { Modal } from '@/modal';
 import { formatPathRelativeToHome, getSessionName, getSessionSubtitle } from '@/utils/sessionUtils';
 import { isMachineOnline } from '@/utils/machineUtils';
@@ -19,6 +19,10 @@ import { useNavigateToSession } from '@/hooks/useNavigateToSession';
 import { machineSpawnNewSession } from '@/sync/ops';
 import { resolveAbsolutePath } from '@/utils/pathUtils';
 import { MultiTextInput, type MultiTextInputHandle } from '@/components/MultiTextInput';
+import type { CodexOperationKind, CodexOperationSnapshot, CodexStatus } from '@slopus/happy-wire';
+import type { CodexDeviceGroup } from '@slopus/happy-wire';
+import { assignMachineToCodexDeviceGroup, removeCodexDeviceGroup, resolveCodexPolicyAssignment, upsertCodexDeviceGroup } from '@/sync/codexDeviceGroups';
+import { CodexPolicyEditor } from '@/components/CodexPolicyEditor';
 
 const styles = StyleSheet.create((theme) => ({
     pathInputContainer: {
@@ -68,6 +72,8 @@ export default function MachineDetailScreen() {
     const router = useRouter();
     const sessions = useSessions();
     const machine = useMachine(machineId!);
+    const allMachines = useAllMachines({ includeOffline: true });
+    const settings = useSettings();
     const navigateToSession = useNavigateToSession();
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isStoppingDaemon, setIsStoppingDaemon] = useState(false);
@@ -77,6 +83,10 @@ export default function MachineDetailScreen() {
     const [isSpawning, setIsSpawning] = useState(false);
     const inputRef = useRef<MultiTextInputHandle>(null);
     const [showAllPaths, setShowAllPaths] = useState(false);
+    const [codexStatus, setCodexStatus] = useState<CodexStatus | null>(null);
+    const [codexOperation, setCodexOperation] = useState<CodexOperationSnapshot | null>(null);
+    const [isCodexBusy, setIsCodexBusy] = useState(false);
+    const [isApplyingCodexGroup, setIsApplyingCodexGroup] = useState(false);
     // Variant D only
 
     const machineSessions = useMemo(() => {
@@ -94,6 +104,11 @@ export default function MachineDetailScreen() {
             .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
             .slice(0, 5);
     }, [machineSessions]);
+
+    const assignedCodexGroup = useMemo(() => (
+        settings.codexDeviceGroups.find((group) => group.machineIds.includes(machineId!)) ?? null
+    ), [machineId, settings.codexDeviceGroups]);
+    const hasPendingCodexOperation = codexOperation?.state === 'queued' || codexOperation?.state === 'running';
 
     const recentPaths = useMemo(() => {
         const paths = new Set<string>();
@@ -161,6 +176,147 @@ export default function MachineDetailScreen() {
         setIsRefreshing(true);
         await sync.refreshMachines();
         setIsRefreshing(false);
+    };
+
+    const pollCodexOperation = async (initial: CodexOperationSnapshot) => {
+        if (!machineId) return initial;
+        let snapshot = initial;
+        for (let attempt = 0; attempt < 400 && (snapshot.state === 'queued' || snapshot.state === 'running'); attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            snapshot = await machineCodexOperationStatus(machineId, snapshot.operationId) ?? snapshot;
+            setCodexOperation(snapshot);
+        }
+        if (snapshot.result) setCodexStatus(snapshot.result);
+        if (snapshot.state === 'failed') {
+            Modal.alert('Codex operation failed', snapshot.error || 'The device could not complete the operation.');
+        } else if (snapshot.state === 'queued' || snapshot.state === 'running') {
+            Modal.alert('Codex operation still running', 'You can continue monitoring this operation from the device page.');
+        }
+        return snapshot;
+    };
+
+    const runCodexOperation = async (kind: CodexOperationKind) => {
+        if (!machine || !machineId || isCodexBusy || hasPendingCodexOperation || !isMachineOnline(machine)) return;
+        if (kind !== 'status') {
+            const confirmed = await Modal.confirm(
+                kind === 'restart' ? 'Restart Codex sessions?' : 'Update Codex CLI?',
+                kind === 'restart'
+                    ? 'Active daemon-owned Codex sessions on this device will reconnect.'
+                    : 'The detected package manager will update Codex on this device.',
+                { confirmText: kind === 'restart' ? 'Restart' : 'Update' },
+            );
+            if (!confirmed) return;
+        }
+        setIsCodexBusy(true);
+        const operationId = sync.encryption.generateId();
+        try {
+            const snapshot = await machineCodexOperationStart(machineId, { operationId, kind });
+            setCodexOperation(snapshot);
+            await pollCodexOperation(snapshot);
+        } catch (error) {
+            Modal.alert(t('common.error'), error instanceof Error ? error.message : 'The device is unavailable.');
+        } finally {
+            setIsCodexBusy(false);
+        }
+    };
+
+    const continueCodexOperation = async () => {
+        if (!codexOperation || !hasPendingCodexOperation || isCodexBusy) return;
+        setIsCodexBusy(true);
+        try {
+            await pollCodexOperation(codexOperation);
+        } catch (error) {
+            Modal.alert(t('common.error'), error instanceof Error ? error.message : 'The device is unavailable.');
+        } finally {
+            setIsCodexBusy(false);
+        }
+    };
+
+    const persistCodexGroups = async (groups: CodexDeviceGroup[], affectedMachineIds: string[]) => {
+        sync.applySettings({ codexDeviceGroups: groups });
+        const results = await Promise.allSettled(affectedMachineIds.map(async (affectedMachineId) => {
+            const target = allMachines.find((candidate) => candidate.id === affectedMachineId);
+            if (!target?.metadata) throw new Error(`Machine metadata unavailable: ${affectedMachineId}`);
+            await machinePatchMetadata(
+                affectedMachineId,
+                target.metadata,
+                { codexPolicyAssignment: resolveCodexPolicyAssignment(groups, affectedMachineId) },
+                target.metadataVersion,
+            );
+        }));
+        const failed = results.filter((result) => result.status === 'rejected');
+        if (failed.length > 0) throw new Error(`Policy saved, but ${failed.length} device update(s) failed`);
+    };
+
+    const assignCodexGroup = async (groupId: string | null) => {
+        if (!machineId || isApplyingCodexGroup) return;
+        setIsApplyingCodexGroup(true);
+        try {
+            const next = assignMachineToCodexDeviceGroup(settings.codexDeviceGroups, machineId, groupId);
+            await persistCodexGroups(next, [machineId]);
+        } catch (error) {
+            Modal.alert(t('common.error'), error instanceof Error ? error.message : 'Failed to assign Codex group');
+        } finally {
+            setIsApplyingCodexGroup(false);
+        }
+    };
+
+    const createCodexGroup = async () => {
+        if (!machineId || isApplyingCodexGroup) return;
+        const name = await Modal.prompt('New Codex device group', undefined, { placeholder: 'Group name', confirmText: 'Create' });
+        if (!name?.trim()) return;
+        const group: CodexDeviceGroup = {
+            id: `group-${sync.encryption.generateId()}`,
+            name: name.trim(),
+            machineIds: [],
+            policy: { revision: 1, baseConfig: {}, mcpServers: [], skills: [] },
+        };
+        const withGroup = upsertCodexDeviceGroup(settings.codexDeviceGroups, group);
+        setIsApplyingCodexGroup(true);
+        try {
+            const next = assignMachineToCodexDeviceGroup(withGroup, machineId, group.id);
+            await persistCodexGroups(next, [machineId]);
+        } catch (error) {
+            Modal.alert(t('common.error'), error instanceof Error ? error.message : 'Failed to create Codex group');
+        } finally {
+            setIsApplyingCodexGroup(false);
+        }
+    };
+
+    const editCodexGroup = (group: CodexDeviceGroup) => {
+        Modal.show({
+            component: CodexPolicyEditor,
+            props: {
+                group,
+                onSave: async (updated: CodexDeviceGroup) => {
+                    const latestGroups = storage.getState().settings.codexDeviceGroups;
+                    const latest = latestGroups.find((candidate) => candidate.id === group.id);
+                    if (!latest || latest.policy.revision !== group.policy.revision) {
+                        throw new Error('This group changed on another client. Close and reopen the editor.');
+                    }
+                    const next = upsertCodexDeviceGroup(latestGroups, updated);
+                    await persistCodexGroups(next, updated.machineIds);
+                },
+            },
+        });
+    };
+
+    const deleteCodexGroup = async (group: CodexDeviceGroup) => {
+        const confirmed = await Modal.confirm(
+            'Delete Codex device group?',
+            `${group.name} will be removed from ${group.machineIds.length} device(s).`,
+            { confirmText: 'Delete', destructive: true },
+        );
+        if (!confirmed) return;
+        setIsApplyingCodexGroup(true);
+        try {
+            const next = removeCodexDeviceGroup(storage.getState().settings.codexDeviceGroups, group.id);
+            await persistCodexGroups(next, group.machineIds);
+        } catch (error) {
+            Modal.alert(t('common.error'), error instanceof Error ? error.message : 'Failed to delete Codex group');
+        } finally {
+            setIsApplyingCodexGroup(false);
+        }
     };
 
     const handleDeleteMachine = async () => {
@@ -559,6 +715,98 @@ export default function MachineDetailScreen() {
                             subtitle={new Date(metadata.cliAvailability.detectedAt).toLocaleString()}
                             showChevron={false}
                         />
+                    </ItemGroup>
+                )}
+
+                {metadata?.cliAvailability?.codex && (
+                    <ItemGroup title="Codex">
+                        <Item
+                            title="Version"
+                            subtitle={codexStatus?.version || 'Tap check to read the installed version'}
+                            showChevron={false}
+                        />
+                        <Item
+                            title="Check Codex status"
+                            subtitle={codexOperation?.kind === 'status' ? `${codexOperation.state}${codexOperation.progress !== undefined ? ` (${codexOperation.progress}%)` : ''}` : undefined}
+                            onPress={() => void runCodexOperation('status')}
+                            disabled={isCodexBusy || hasPendingCodexOperation || !isMachineOnline(machine)}
+                            rightElement={isCodexBusy && codexOperation?.kind === 'status' ? <ActivityIndicator size="small" /> : <Ionicons name="refresh-outline" size={20} color={theme.colors.textSecondary} />}
+                        />
+                        <Item
+                            title="Restart Codex sessions"
+                            subtitle="Reconnect all Codex sessions on this device"
+                            onPress={() => void runCodexOperation('restart')}
+                            disabled={isCodexBusy || hasPendingCodexOperation || !isMachineOnline(machine)}
+                            rightElement={isCodexBusy && codexOperation?.kind === 'restart' ? <ActivityIndicator size="small" /> : <Ionicons name="reload-outline" size={20} color={theme.colors.textSecondary} />}
+                        />
+                        <Item
+                            title="Update Codex CLI"
+                            subtitle="Uses the detected package manager"
+                            onPress={() => void runCodexOperation('update')}
+                            disabled={isCodexBusy || hasPendingCodexOperation || !isMachineOnline(machine)}
+                            rightElement={isCodexBusy && codexOperation?.kind === 'update' ? <ActivityIndicator size="small" /> : <Ionicons name="cloud-download-outline" size={20} color={theme.colors.textSecondary} />}
+                        />
+                        {hasPendingCodexOperation && !isCodexBusy && (
+                            <Item
+                                title="Continue monitoring"
+                                subtitle={`${codexOperation.kind} · ${codexOperation.state}${codexOperation.progress !== undefined ? ` (${codexOperation.progress}%)` : ''}`}
+                                onPress={() => void continueCodexOperation()}
+                                rightElement={<Ionicons name="pulse-outline" size={20} color={theme.colors.textSecondary} />}
+                            />
+                        )}
+                    </ItemGroup>
+                )}
+
+                {metadata?.cliAvailability?.codex && (
+                    <ItemGroup title="Codex device group">
+                        <Item
+                            title="Current group"
+                            subtitle={assignedCodexGroup?.name || 'Not assigned'}
+                            showChevron={false}
+                            rightElement={isApplyingCodexGroup ? <ActivityIndicator size="small" /> : undefined}
+                        />
+                        {settings.codexDeviceGroups.map((group) => (
+                            <Item
+                                key={group.id}
+                                title={group.name}
+                                subtitle={`Policy revision ${group.policy.revision} · ${group.machineIds.length} device(s)`}
+                                onPress={() => void assignCodexGroup(group.id)}
+                                disabled={isApplyingCodexGroup}
+                                rightElement={group.id === assignedCodexGroup?.id
+                                    ? <Ionicons name="checkmark-circle" size={21} color={theme.colors.success} />
+                                    : <Ionicons name="ellipse-outline" size={21} color={theme.colors.textSecondary} />}
+                            />
+                        ))}
+                        <Item
+                            title="Create device group"
+                            onPress={() => void createCodexGroup()}
+                            disabled={isApplyingCodexGroup}
+                            rightElement={<Ionicons name="add-circle-outline" size={21} color={theme.colors.textSecondary} />}
+                        />
+                        {assignedCodexGroup && (
+                            <>
+                                <Item
+                                    title="Edit group policy"
+                                    subtitle="Base config, MCP servers, and Skills"
+                                    onPress={() => editCodexGroup(assignedCodexGroup)}
+                                    disabled={isApplyingCodexGroup}
+                                    rightElement={<Ionicons name="options-outline" size={21} color={theme.colors.textSecondary} />}
+                                />
+                                <Item
+                                    title="Remove from group"
+                                    onPress={() => void assignCodexGroup(null)}
+                                    disabled={isApplyingCodexGroup}
+                                    rightElement={<Ionicons name="remove-circle-outline" size={21} color={theme.colors.textDestructive} />}
+                                />
+                                <Item
+                                    title="Delete group"
+                                    onPress={() => void deleteCodexGroup(assignedCodexGroup)}
+                                    disabled={isApplyingCodexGroup}
+                                    destructive
+                                    rightElement={<Ionicons name="trash-outline" size={21} color={theme.colors.textDestructive} />}
+                                />
+                            </>
+                        )}
                     </ItemGroup>
                 )}
 

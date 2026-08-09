@@ -2,6 +2,19 @@ import { describe, it, expect } from 'vitest';
 import { settingsParse, applySettings, settingsDefaults, settingsToSyncPayload, type Settings } from './settings';
 
 describe('settings', () => {
+    it('preserves encrypted account-scoped Codex device groups', () => {
+        const codexDeviceGroups = [{
+            id: 'dev',
+            name: 'Development',
+            machineIds: ['machine-1'],
+            policy: { revision: 1 },
+        }];
+        expect(settingsParse({ codexDeviceGroups }).codexDeviceGroups).toEqual([{
+            ...codexDeviceGroups[0],
+            policy: { revision: 1, baseConfig: {}, mcpServers: [], skills: [] },
+        }]);
+    });
+
     describe('settingsParse', () => {
         it('should return defaults when given invalid input', () => {
             expect(settingsParse(null)).toEqual(settingsDefaults);
@@ -207,6 +220,7 @@ describe('settings', () => {
                 lastUsedPermissionMode: null,
                 lastUsedModelMode: null,
                 agentDefaultOverrides: {},
+                codexDeviceGroups: [],
                 dismissedCLIWarnings: { perMachine: {}, global: {} },
             });
         });

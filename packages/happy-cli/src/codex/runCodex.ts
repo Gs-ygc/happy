@@ -58,6 +58,11 @@ import {
 } from './codexPrompt';
 import { discoverCodexSkillCommands } from './codexSkills';
 import {
+    buildCodexManagedRuntime,
+    codexManagedPolicyPath,
+    readCodexManagedPolicy,
+} from './codexManagedPolicy';
+import {
     codexGoalActionCapabilities,
     mapCodexGoalEventToAgentGoalStatus,
     formatCodexGoalProgressNotification,
@@ -1011,7 +1016,10 @@ export async function runCodex(opts: {
     // codex would otherwise fail to start the MCP server, the change_title tool would
     // not be visible to the model, and the model would improvise with shell echoes.
     const bridgeEntrypoint = join(projectPath(), 'bin', 'happy-mcp.mjs');
+    const managedPolicy = await readCodexManagedPolicy(codexManagedPolicyPath(configuration.happyHomeDir));
+    const managedRuntime = buildCodexManagedRuntime(managedPolicy);
     const mcpServers = {
+        ...managedRuntime.mcpServers,
         happy: {
             command: process.execPath,
             args: ['--no-warnings', '--no-deprecation', bridgeEntrypoint, '--url', happyServer.url]
@@ -1035,6 +1043,7 @@ export async function runCodex(opts: {
                 threadId: opts.resumeThreadId,
                 cwd: process.cwd(),
                 mcpServers,
+                baseConfig: managedRuntime.baseConfig,
             });
             first = false;
             appendSystemPromptInjected = true;
@@ -1153,7 +1162,11 @@ export async function runCodex(opts: {
                     await client.connect();
                     if (recoverableCodexThreadId) {
                         try {
-                            const recovered = await client.resumeThread({ threadId: recoverableCodexThreadId });
+                            const recovered = await client.resumeThread({
+                                threadId: recoverableCodexThreadId,
+                                mcpServers,
+                                baseConfig: managedRuntime.baseConfig,
+                            });
                             recoverableCodexThreadId = null;
                             session.updateMetadata((currentMetadata) => (
                                 markCodexRestartSucceeded(currentMetadata, recovered.threadId)
@@ -1174,6 +1187,7 @@ export async function runCodex(opts: {
                         approvalPolicy: executionPolicy.approvalPolicy,
                         sandbox: executionPolicy.sandbox,
                         mcpServers,
+                        baseConfig: managedRuntime.baseConfig,
                     });
                     activeThreadId = startedThread.threadId;
                     session.updateMetadata((currentMetadata) => ({

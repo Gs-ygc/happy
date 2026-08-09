@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { Update, UpdateMachineBody } from '@slopus/happy-wire';
+import { CodexPolicyAssignmentSchema, type Update, type UpdateMachineBody } from '@slopus/happy-wire';
 import { UsageSchema } from '@/claude/types'
 import type { SandboxConfig } from '@/persistence'
 
@@ -148,6 +148,7 @@ export const MachineMetadataSchema = z.object({
     happyAgentAuthenticated: z.boolean(),
     detectedAt: z.number(),
   }).optional(),
+  codexPolicyAssignment: CodexPolicyAssignmentSchema.nullable().optional(),
 })
 
 export type MachineMetadata = z.infer<typeof MachineMetadataSchema>

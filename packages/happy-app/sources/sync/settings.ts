@@ -1,6 +1,7 @@
 import * as z from 'zod';
 import { AgentDefaultOverridesSchema } from './agentDefaults';
 import { DEFAULT_USER_MESSAGE_BUBBLE_COLOR } from '../utils/userMessageBubbleColor';
+import { CodexDeviceGroupsSchema } from '@slopus/happy-wire';
 
 //
 // Settings Schema
@@ -55,6 +56,7 @@ export const SettingsSchema = z.object({
     lastUsedPermissionMode: z.string().nullable().describe('Last selected permission mode for new sessions'),
     lastUsedModelMode: z.string().nullable().describe('Last selected model mode for new sessions'),
     agentDefaultOverrides: AgentDefaultOverridesSchema.describe('User-selected agent defaults. Missing values use code defaults and are not sent as agent metadata.'),
+    codexDeviceGroups: CodexDeviceGroupsSchema.describe('Account-scoped Codex device groups and encrypted policies.'),
     // Dismissed CLI warning banners (supports both per-machine and global dismissal)
     dismissedCLIWarnings: z.object({
         perMachine: z.record(z.string(), z.object({
@@ -128,6 +130,7 @@ export const settingsDefaults: Settings = {
     lastUsedPermissionMode: null,
     lastUsedModelMode: null,
     agentDefaultOverrides: {},
+    codexDeviceGroups: [],
     dismissedCLIWarnings: { perMachine: {}, global: {} },
 };
 Object.freeze(settingsDefaults);
