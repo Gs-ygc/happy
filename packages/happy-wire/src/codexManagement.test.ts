@@ -45,6 +45,20 @@ describe('Codex management wire contract', () => {
 });
 
 describe('Codex device policy schemas', () => {
+    it('defaults all managed sync controls to disabled for new policies', () => {
+        const policy = CodexPolicyAssignmentSchema.parse({
+            groupId: 'a',
+            groupName: 'A',
+            policy: { revision: 1 },
+        }).policy;
+        expect(policy).toMatchObject({
+            enabled: false,
+            syncBaseConfig: false,
+            syncMcpServers: false,
+            syncSkills: false,
+        });
+    });
+
     it('accepts an account-scoped group without embedding secret values', () => {
         const groups = CodexDeviceGroupsSchema.parse([{
             id: 'group-dev',

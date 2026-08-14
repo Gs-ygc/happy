@@ -51,6 +51,8 @@ export const en = {
         statusThinking: 'Thinking',
         statusPermission: 'Permission required',
         statusRunning: 'Running',
+        statusStreaming: 'Streaming',
+        statusTool: 'Running tool',
         statusIdle: 'Idle',
         pending: 'Pending',
         statusPending: 'Pending submission',

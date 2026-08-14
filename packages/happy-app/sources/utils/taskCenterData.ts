@@ -12,7 +12,7 @@ import { resolveVisibleAgentGoalStatus, type VisibleAgentGoalStatus } from '@/co
  * tested without React Native / storage dependencies.
  */
 
-export type TaskRunState = 'thinking' | 'permission_required' | 'running';
+export type TaskRunState = 'thinking' | 'permission_required' | 'running' | 'streaming' | 'tool' | 'idle';
 
 export interface TaskItem {
     sessionId: string;
@@ -61,10 +61,8 @@ export interface TaskCenterData {
 export const OTHER_PROJECT_KEY = '__other__';
 
 /**
- * How long a session can go without real activity (messages / state changes)
- * before it is considered idle, even though the daemon is still connected.
- * The CLI heartbeats every 2 seconds regardless of activity, so aliveness
- * alone does not mean the agent is actually doing something.
+ * Kept for compatibility with callers that used the former time-window
+ * heuristic. Activity membership is now driven by provider events instead.
  */
 export const TASK_IDLE_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
@@ -77,26 +75,25 @@ export function isTaskOnline(session: Pick<Session, 'active' | 'presence'>): boo
 }
 
 /**
- * True when the agent is actually working (thinking, waiting for a permission
- * decision) or has seen real activity within the idle window.
+ * True when the provider reports a work state, or the session has a pending
+ * request/goal. Daemon liveness and updatedAt are deliberately insufficient.
  */
 export function isTaskActivelyWorking(session: Session, now: number = Date.now()): boolean {
     const hasPendingRequests = !!(session.agentState?.requests && Object.keys(session.agentState.requests).length > 0);
     if (hasPendingRequests || session.thinking) {
         return true;
     }
-    // Goal-mode long tasks stay active even between messages: the agent is
-    // still pursuing an in-progress goal (agentGoalStatus.status === 'active'
-    // with an online daemon), which can run longer than the idle window
-    // without emitting a message or a state change.
+    const activityState = session.activityState;
+    if (activityState === 'thinking' || activityState === 'streaming' || activityState === 'tool' || activityState === 'permission' || activityState === 'goal') {
+        return true;
+    }
+    // Goal-mode long tasks stay active even between provider messages.
     if (resolveVisibleAgentGoalStatus(session) !== null) {
         return true;
     }
-    // updatedAt only moves on real activity: the server bumps it on message
-    // create and metadata/agent-state changes, and heartbeat writes use raw
-    // SQL that never touches it. So this window filters out sessions that are
-    // merely connected but had no input/output for the idle window.
-    return now - session.updatedAt < TASK_IDLE_TIMEOUT_MS;
+    // The timestamp is intentionally not used to claim that work is running.
+    // It is retained for sorting/history compatibility and stale-data cleanup.
+    return false;
 }
 
 /**
@@ -131,13 +128,17 @@ export function hasPendingUserInput(session: Pick<Session, 'draft'>): boolean {
  * Sub-state shown in the running section:
  * - permission_required: agent is waiting for a tool permission decision
  * - thinking: agent is actively working
- * - running: online, idle, but still an active session
+ * - running: goal-mode execution
  */
-export function getTaskRunState(session: Session): TaskRunState {
+export function getTaskRunState(session: Session, now: number = Date.now()): TaskRunState {
     const hasPendingRequests = !!(session.agentState?.requests && Object.keys(session.agentState.requests).length > 0);
     if (hasPendingRequests) return 'permission_required';
-    if (session.thinking) return 'thinking';
-    return 'running';
+    if (session.activityState === 'permission') return 'permission_required';
+    if (session.activityState === 'streaming') return 'streaming';
+    if (session.activityState === 'tool') return 'tool';
+    if (session.thinking || session.activityState === 'thinking') return 'thinking';
+    if (session.activityState === 'goal' || resolveVisibleAgentGoalStatus(session) !== null) return 'running';
+    return 'idle';
 }
 
 export function getMachineDisplayName(machine: Machine | undefined | null): string {
@@ -159,7 +160,7 @@ export function buildTaskItem(
         path: session.metadata?.path ?? null,
         machineId,
         machineName: machineId ? getMachineDisplayName(machines[machineId]) : null,
-        state: getTaskRunState(session),
+        state: getTaskRunState(session, now),
         goal: resolveVisibleAgentGoalStatus(session),
         updatedAt: session.updatedAt,
         createdAt: session.createdAt,
@@ -210,9 +211,17 @@ export function buildTaskCenterData(
         const aGoal = a.goal?.status === 'active' ? 1 : 0;
         const bGoal = b.goal?.status === 'active' ? 1 : 0;
         if (aGoal !== bGoal) return bGoal - aGoal;
-        const aWorking = a.state === 'running' ? 0 : 1;
-        const bWorking = b.state === 'running' ? 0 : 1;
-        if (aWorking !== bWorking) return bWorking - aWorking;
+        const statePriority: Record<TaskRunState, number> = {
+            thinking: 0,
+            permission_required: 1,
+            tool: 2,
+            streaming: 3,
+            running: 4,
+            idle: 5,
+        };
+        const aPriority = statePriority[a.state];
+        const bPriority = statePriority[b.state];
+        if (aPriority !== bPriority) return aPriority - bPriority;
         return b.updatedAt - a.updatedAt;
     });
     pending.sort((a, b) => b.updatedAt - a.updatedAt);

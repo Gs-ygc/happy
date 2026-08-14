@@ -3,6 +3,7 @@ import React from "react";
 import { ApiClient } from '@/api/api';
 import { CodexAppServerClient } from './codexAppServerClient';
 import type { ReasoningEffort } from './codexAppServerTypes';
+import type { SessionActivityState } from '@slopus/happy-wire';
 import { CodexPermissionHandler } from './utils/permissionHandler';
 import { toMetadataModels } from './utils/modelMetadata';
 import { ReasoningProcessor } from './utils/reasoningProcessor';
@@ -434,6 +435,7 @@ export async function runCodex(opts: {
     });
     session.onUserMessage(handleUserMessage);
     let thinking = false;
+    let activityState: SessionActivityState = 'idle';
     let currentTurnId: string | null = null;
     // A failed forced restart clears the active client/session metadata so it
     // cannot be mistaken for a live provider thread. Keep the original ID
@@ -446,10 +448,15 @@ export async function runCodex(opts: {
     let codexCollabReceiverThreadIdsByCall = new Map<string, string[]>();
     let codexCollabToolByCall = new Map<string, string>();
     let activeTurnPermissionMode: PermissionMode | undefined = undefined;
-    session.keepAlive(thinking, 'remote');
+    const publishActivity = (next: SessionActivityState) => {
+        activityState = next;
+        thinking = next === 'thinking' || next === 'streaming' || next === 'tool' || next === 'goal';
+        session.keepAlive(thinking, 'remote', activityState);
+    };
+    publishActivity('idle');
     // Periodic keep-alive; store handle so we can clear on exit
     const keepAliveInterval = setInterval(() => {
-        session.keepAlive(thinking, 'remote');
+        session.keepAlive(thinking, 'remote', activityState);
     }, 2000);
 
     const sendReady = () => {
@@ -565,8 +572,7 @@ export async function runCodex(opts: {
             reasoningProcessor.abort();
             diffProcessor.reset();
             activeTurnPermissionMode = undefined;
-            thinking = false;
-            session.keepAlive(false, 'remote');
+            publishActivity('idle');
 
             let result: RestartCodexBackendResult;
             const previousThreadId = client.threadId;
@@ -753,9 +759,13 @@ export async function runCodex(opts: {
             agentGoalStatus: goalStatus,
         }));
         if (goalStatus.status !== 'active') {
+            if (activityState === 'goal') {
+                publishActivity('idle');
+            }
             lastGoalProgressNotification = null;
             return;
         }
+        publishActivity('goal');
 
         const snapshot = getCodexGoalProgressSnapshot(goalStatus);
         if (!snapshot) {
@@ -871,7 +881,9 @@ export async function runCodex(opts: {
         }
 
         try {
+            publishActivity('permission');
             const result = await permissionHandler.handleToolCall(params.callId, toolName, input);
+            publishActivity('thinking');
             logger.debug('[Codex] Permission result:', result.decision);
             return result.decision;
         } catch (error) {
@@ -887,14 +899,20 @@ export async function runCodex(opts: {
 
         // Add messages to the ink UI buffer based on message type
         if (msg.type === 'agent_message') {
+            publishActivity('streaming');
             messageBuffer.addMessage((msg as any).message, 'assistant');
+        } else if (msg.type === 'agent_message_delta') {
+            publishActivity('streaming');
         } else if (msg.type === 'agent_reasoning_delta') {
+            publishActivity('thinking');
             // Skip reasoning deltas in the UI to reduce noise
         } else if (msg.type === 'agent_reasoning' && !isSubagentScopedEvent) {
             messageBuffer.addMessage(`[Thinking] ${(msg as any).text.substring(0, 100)}...`, 'system');
         } else if (msg.type === 'exec_command_begin') {
+            publishActivity('tool');
             messageBuffer.addMessage(`Executing: ${(msg as any).command}`, 'tool');
         } else if (msg.type === 'exec_command_end') {
+            publishActivity('thinking');
             const output = (msg as any).output || (msg as any).error || 'Command completed';
             const truncatedOutput = output.substring(0, 200);
             messageBuffer.addMessage(
@@ -902,6 +920,7 @@ export async function runCodex(opts: {
                 'result'
             );
         } else if (msg.type === 'task_started') {
+            publishActivity('thinking');
             messageBuffer.addMessage('Starting task...', 'status');
         } else if (msg.type === 'task_complete') {
             // Ready is emitted from the main loop's idle check so pushes only fire once
@@ -927,14 +946,14 @@ export async function runCodex(opts: {
             if (!thinking) {
                 logger.debug('thinking started');
                 thinking = true;
-                session.keepAlive(thinking, 'remote');
+                session.keepAlive(thinking, 'remote', activityState);
             }
         }
         if (msg.type === 'task_complete' || msg.type === 'turn_aborted') {
             if (thinking) {
                 logger.debug('thinking completed');
                 thinking = false;
-                session.keepAlive(thinking, 'remote');
+                publishActivity('idle');
             }
             // Reset diff processor on task end or abort
             diffProcessor.reset();
@@ -949,12 +968,14 @@ export async function runCodex(opts: {
             reasoningProcessor.complete((msg as any).text);
         }
         if (msg.type === 'patch_apply_begin') {
+            publishActivity('tool');
             const { changes } = msg as any;
             const changeCount = Object.keys(changes).length;
             const filesMsg = changeCount === 1 ? '1 file' : `${changeCount} files`;
             messageBuffer.addMessage(`Modifying ${filesMsg}...`, 'tool');
         }
         if (msg.type === 'patch_apply_end') {
+            publishActivity('thinking');
             const { stdout, stderr, success } = msg as any;
             if (success) {
                 const message = stdout || 'Files modified successfully';
@@ -1125,7 +1146,7 @@ export async function runCodex(opts: {
                 diffProcessor.reset();
                 appendSystemPromptInjected = false;
                 thinking = false;
-                session.keepAlive(thinking, 'remote');
+                publishActivity('idle');
                 messageBuffer.addMessage('Context was reset', 'status');
                 session.sendSessionEvent({ type: 'message', message: 'Context was reset' });
                 session.updateMetadata((currentMetadata) => {
@@ -1261,7 +1282,7 @@ export async function runCodex(opts: {
                 diffProcessor.reset();
                 activeTurnPermissionMode = undefined;
                 thinking = false;
-                session.keepAlive(thinking, 'remote');
+                publishActivity('idle');
                 emitReadyIfIdle({
                     pending,
                     queueSize: () => messageQueue.size(),

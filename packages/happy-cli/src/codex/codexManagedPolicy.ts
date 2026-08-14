@@ -79,8 +79,9 @@ export function buildCodexManagedRuntime(
     environment: NodeJS.ProcessEnv = process.env,
 ): CodexManagedRuntime {
     const policy: CodexDevicePolicy | null = assignment?.policy ?? null;
+    if (!policy?.enabled) return { baseConfig: {}, mcpServers: {} };
     const mcpServers: Record<string, unknown> = {};
-    for (const server of policy?.mcpServers ?? []) {
+    for (const server of policy.syncMcpServers ? policy.mcpServers : []) {
         const env: Record<string, string> = { ...server.plainEnv };
         for (const [targetName, sourceName] of Object.entries(server.secretEnv)) {
             const value = environment[sourceName];
@@ -93,7 +94,10 @@ export function buildCodexManagedRuntime(
             ...(Object.keys(env).length > 0 ? { env } : {}),
         };
     }
-    return { baseConfig: { ...(policy?.baseConfig ?? {}) }, mcpServers };
+    return {
+        baseConfig: policy.syncBaseConfig ? { ...policy.baseConfig } : {},
+        mcpServers,
+    };
 }
 
 export async function materializeCodexManagedSkills(
@@ -105,7 +109,7 @@ export async function materializeCodexManagedSkills(
     const backup = `${root}.${process.pid}.old`;
     await rm(staging, { recursive: true, force: true });
     await mkdir(staging, { recursive: true });
-    for (const skill of assignment?.policy.skills ?? []) {
+    for (const skill of assignment?.policy.enabled && assignment.policy.syncSkills ? assignment.policy.skills : []) {
         if (!skill.enabled) continue;
         const destination = join(staging, skill.id);
         if (skill.source.kind === 'local') {

@@ -7,9 +7,10 @@ import {
 } from './codexDeviceGroups';
 
 describe('Codex device groups', () => {
+    const disabledPolicy = { revision: 1, enabled: false, syncBaseConfig: false, syncMcpServers: false, syncSkills: false, baseConfig: {}, mcpServers: [], skills: [] };
     const groups = [
-        { id: 'dev', name: 'Development', machineIds: ['machine-1'], membershipRevision: 0, policy: { revision: 1, baseConfig: {}, mcpServers: [], skills: [] } },
-        { id: 'prod', name: 'Production', machineIds: [], membershipRevision: 0, policy: { revision: 2, baseConfig: {}, mcpServers: [], skills: [] } },
+        { id: 'dev', name: 'Development', machineIds: ['machine-1'], membershipRevision: 0, policy: disabledPolicy },
+        { id: 'prod', name: 'Production', machineIds: [], membershipRevision: 0, policy: { ...disabledPolicy, revision: 2 } },
     ];
 
     it('moves a machine between groups instead of assigning it twice', () => {

@@ -91,8 +91,12 @@ describe('isTaskActivelyWorking', () => {
         expect(isTaskActivelyWorking(session, now)).toBe(true);
     });
 
-    it('returns true when the session had real activity recently', () => {
-        expect(isTaskActivelyWorking(sessionWith({ updatedAt: now - 60_000 }), now)).toBe(true);
+    it('does not infer active work from a recent message timestamp', () => {
+        expect(isTaskActivelyWorking(sessionWith({ createdAt: now - 120_000, updatedAt: now - 60_000 }), now)).toBe(false);
+    });
+
+    it('does not treat a newly created session with no messages as active work', () => {
+        expect(isTaskActivelyWorking(sessionWith({ createdAt: now - 60_000, updatedAt: now - 60_000 }), now)).toBe(false);
     });
 
     it('returns false when the session has been idle past the timeout', () => {
@@ -107,7 +111,7 @@ describe('isTaskRunning', () => {
     const now = 10_000_000_000;
 
     it('is running when online and actively working', () => {
-        expect(isTaskRunning(sessionWith({ updatedAt: now - 5000 }), now)).toBe(true);
+        expect(isTaskRunning(sessionWith({ updatedAt: now - 5000, activityState: 'thinking' }), now)).toBe(true);
     });
 
     it('is not running when online but idle for a long time', () => {
@@ -148,14 +152,14 @@ describe('getTaskRunState', () => {
         expect(getTaskRunState(sessionWith({ thinking: true }))).toBe('thinking');
     });
 
-    it('returns running otherwise', () => {
-        expect(getTaskRunState(sessionWith({}))).toBe('running');
+    it('returns idle when the agent is online without an activity state', () => {
+        expect(getTaskRunState(sessionWith({ createdAt: 1_000, updatedAt: 1_000 }))).toBe('idle');
     });
 });
 
 describe('buildTaskCenterData', () => {
     it('partitions running sessions into the running section and the rest into projects', () => {
-        const running = sessionWith({ id: 'run-1', updatedAt: Date.now() - 1000 });
+        const running = sessionWith({ id: 'run-1', updatedAt: Date.now() - 1000, activityState: 'streaming' });
         const inactive = sessionWith({ id: 'rest-1', active: false, presence: 99, updatedAt: 4000 });
         const data = buildTaskCenterData([inactive, running], noMachines, []);
 
@@ -166,14 +170,14 @@ describe('buildTaskCenterData', () => {
     });
 
     it('sorts the running section by most recent activity first', () => {
-        const older = sessionWith({ id: 'old', updatedAt: Date.now() - 200_000 });
-        const newer = sessionWith({ id: 'new', updatedAt: Date.now() - 1000 });
+        const older = sessionWith({ id: 'old', updatedAt: Date.now() - 200_000, activityState: 'streaming' });
+        const newer = sessionWith({ id: 'new', updatedAt: Date.now() - 1000, activityState: 'streaming' });
         const data = buildTaskCenterData([older, newer], noMachines, []);
         expect(data.running.map((item) => item.sessionId)).toEqual(['new', 'old']);
     });
 
     it('keeps thinking and permission sessions ahead of a newer running session', () => {
-        const running = sessionWith({ id: 'run-new', updatedAt: Date.now() });
+        const running = sessionWith({ id: 'run-new', updatedAt: Date.now(), activityState: 'streaming' });
         const thinking = sessionWith({ id: 'think-old', updatedAt: Date.now() - 5000, thinking: true });
         const permission = sessionWith({
             id: 'perm-old',
@@ -225,7 +229,7 @@ describe('buildTaskCenterData', () => {
             draft: '  hello, agent!  ',
             updatedAt: Date.now() - 1000,
         });
-        const running = sessionWith({ id: 'run-1', updatedAt: Date.now() - 2000 });
+        const running = sessionWith({ id: 'run-1', updatedAt: Date.now() - 2000, activityState: 'streaming' });
         const data = buildTaskCenterData([running, drafted], noMachines, []);
 
         expect(data.runningCount).toBe(1);
@@ -249,7 +253,7 @@ describe('buildTaskCenterData', () => {
                 },
             } as any,
         });
-        const recent = sessionWith({ id: 'recent-1', updatedAt: Date.now() - 1000 });
+        const recent = sessionWith({ id: 'recent-1', updatedAt: Date.now() - 1000, activityState: 'streaming' });
         const data = buildTaskCenterData([recent, goal], noMachines, []);
 
         expect(data.running.map((item) => item.sessionId)).toEqual(['goal-1', 'recent-1']);
@@ -267,7 +271,7 @@ describe('buildTaskCenterData', () => {
     });
 
     it('includes running, pending, and inactive sessions in the all-project groups', () => {
-        const running = sessionWith({ id: 'run-all', updatedAt: Date.now() - 1000 });
+        const running = sessionWith({ id: 'run-all', updatedAt: Date.now() - 1000, activityState: 'streaming' });
         const pending = sessionWith({ id: 'draft-all', draft: 'send this', updatedAt: Date.now() - 2000 });
         const inactive = sessionWith({ id: 'idle-all', active: false, presence: 1, updatedAt: Date.now() - 3000 });
 
@@ -303,7 +307,7 @@ describe('buildTaskCenterData', () => {
     });
 
     it('marks pinned sessions', () => {
-        const session = sessionWith({ id: 'pinned-1', updatedAt: Date.now() - 1000 });
+        const session = sessionWith({ id: 'pinned-1', updatedAt: Date.now() - 1000, activityState: 'streaming' });
         const data = buildTaskCenterData([session], noMachines, ['pinned-1']);
         expect(data.running[0].isPinned).toBe(true);
     });

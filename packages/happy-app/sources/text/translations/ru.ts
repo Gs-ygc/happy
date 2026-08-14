@@ -1097,6 +1097,8 @@ export const ru: TranslationStructure = {
         noTasksDescription: 'Запустите сеанс на вкладке «Терминалы», чтобы создать задачу.',
         otherProjects: 'Прочее',
         statusThinking: 'Думает',
+        statusStreaming: 'Потоковый вывод',
+        statusTool: 'Выполняет инструмент',
         statusPermission: 'Требуется разрешение',
         statusRunning: 'Выполняется',
         statusIdle: 'Простаивает',

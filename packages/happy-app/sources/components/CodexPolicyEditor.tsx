@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useUnistyles } from 'react-native-unistyles';
 import { CodexDevicePolicySchema, type CodexDeviceGroup } from '@slopus/happy-wire';
 import { Typography } from '@/constants/Typography';
+import { Switch } from '@/components/Switch';
 
 export function CodexPolicyEditor({
     group,
@@ -16,6 +17,10 @@ export function CodexPolicyEditor({
 }) {
     const { theme } = useUnistyles();
     const [name, setName] = useState(group.name);
+    const [enabled, setEnabled] = useState(group.policy.enabled);
+    const [syncBaseConfig, setSyncBaseConfig] = useState(group.policy.syncBaseConfig);
+    const [syncMcpServers, setSyncMcpServers] = useState(group.policy.syncMcpServers);
+    const [syncSkills, setSyncSkills] = useState(group.policy.syncSkills);
     const [baseConfig, setBaseConfig] = useState(JSON.stringify(group.policy.baseConfig, null, 2));
     const [mcpServers, setMcpServers] = useState(JSON.stringify(group.policy.mcpServers, null, 2));
     const [skills, setSkills] = useState(JSON.stringify(group.policy.skills, null, 2));
@@ -28,6 +33,10 @@ export function CodexPolicyEditor({
         try {
             const policy = CodexDevicePolicySchema.parse({
                 revision: group.policy.revision + 1,
+                enabled,
+                syncBaseConfig,
+                syncMcpServers,
+                syncSkills,
                 baseConfig: JSON.parse(baseConfig),
                 mcpServers: JSON.parse(mcpServers),
                 skills: JSON.parse(skills),
@@ -77,6 +86,23 @@ export function CodexPolicyEditor({
             </View>
             <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }} keyboardShouldPersistTaps="handled">
                 {field('Group name', name, setName, false)}
+                <View style={{ gap: 4 }}>
+                    {([
+                        ['Enable managed policy', enabled, setEnabled],
+                        ['Sync base config', syncBaseConfig, setSyncBaseConfig],
+                        ['Sync MCP servers', syncMcpServers, setSyncMcpServers],
+                        ['Sync Skills', syncSkills, setSyncSkills],
+                    ] as const).map(([label, value, setter]) => (
+                        <View key={label} style={{ minHeight: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Text style={[Typography.default('regular'), { color: theme.colors.text, fontSize: 14 }]}>{label}</Text>
+                            <Switch
+                                value={value}
+                                onValueChange={setter}
+                                disabled={label !== 'Enable managed policy' && !enabled}
+                            />
+                        </View>
+                    ))}
+                </View>
                 {field('Base config', baseConfig, setBaseConfig)}
                 {field('MCP servers', mcpServers, setMcpServers)}
                 {field('Skills', skills, setSkills)}

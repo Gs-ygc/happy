@@ -141,6 +141,7 @@ export function sessionUpdateHandler(userId: string, socket: Socket, connection:
         sid: string;
         time: number;
         thinking?: boolean;
+        activityState?: 'idle' | 'thinking' | 'streaming' | 'tool' | 'permission' | 'goal';
     }) => {
         try {
             // Track metrics
@@ -172,7 +173,7 @@ export function sessionUpdateHandler(userId: string, socket: Socket, connection:
             activityCache.queueSessionUpdate(sid, t);
 
             // Emit session activity update
-            const sessionActivity = buildSessionActivityEphemeral(sid, true, t, thinking || false);
+            const sessionActivity = buildSessionActivityEphemeral(sid, true, t, thinking || false, data.activityState);
             eventRouter.emitEphemeral({
                 userId,
                 payload: sessionActivity,

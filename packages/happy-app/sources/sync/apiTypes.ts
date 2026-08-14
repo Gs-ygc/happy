@@ -4,6 +4,7 @@ import {
     ApiUpdateMachineStateSchema,
     ApiUpdateNewMessageSchema,
     ApiUpdateSessionStateSchema,
+    SessionActivityStateSchema,
     type ApiMessage,
 } from '@slopus/happy-wire';
 import { GitHubProfileSchema, ImageRefSchema } from './profile';
@@ -185,6 +186,8 @@ export const ApiEphemeralActivityUpdateSchema = z.object({
     active: z.boolean(),
     activeAt: z.number(),
     thinking: z.boolean(),
+    // Older daemons omit this field; sync derives the legacy thinking/idle state.
+    activityState: SessionActivityStateSchema.optional(),
 });
 
 export const ApiEphemeralUsageUpdateSchema = z.object({

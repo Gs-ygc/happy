@@ -1067,6 +1067,8 @@ export const it: TranslationStructure = {
         noTasksDescription: "Avvia una sessione dalla scheda Terminali per creare un'attività.",
         otherProjects: 'Altro',
         statusThinking: 'Pensando',
+        statusStreaming: 'Output in streaming',
+        statusTool: 'Esecuzione strumento',
         statusPermission: 'Permesso richiesto',
         statusRunning: 'In esecuzione',
         statusIdle: 'Inattivo',

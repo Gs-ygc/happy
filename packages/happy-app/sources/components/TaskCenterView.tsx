@@ -35,6 +35,9 @@ const STATUS_CONFIG: Record<TaskRunState, { color: string; isPulsing: boolean }>
     thinking: { color: '#007AFF', isPulsing: true },
     permission_required: { color: '#FF9500', isPulsing: true },
     running: { color: '#34C759', isPulsing: false },
+    streaming: { color: '#34C759', isPulsing: true },
+    tool: { color: '#AF52DE', isPulsing: true },
+    idle: { color: '#999999', isPulsing: false },
 };
 const PENDING_COLOR = '#FF9F0A';
 type TaskCenterSegment = 'running' | 'all';
@@ -47,6 +50,12 @@ function getStatusText(state: TaskRunState): string {
             return t('taskCenter.statusPermission');
         case 'running':
             return t('taskCenter.statusRunning');
+        case 'streaming':
+            return t('taskCenter.statusStreaming');
+        case 'tool':
+            return t('taskCenter.statusTool');
+        case 'idle':
+            return t('taskCenter.statusIdle');
     }
 }
 

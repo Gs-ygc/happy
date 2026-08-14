@@ -26,6 +26,10 @@ describe('Codex managed policy', () => {
             groupName: 'Development',
             policy: {
                 revision: 1,
+                enabled: true,
+                syncBaseConfig: true,
+                syncMcpServers: true,
+                syncSkills: true,
                 baseConfig: { model_reasoning_effort: 'high' },
                 mcpServers: [{
                     name: 'github', command: 'npx', args: ['server'],
@@ -39,6 +43,42 @@ describe('Codex managed policy', () => {
         expect(runtime.mcpServers.github).toMatchObject({ command: 'npx', env: { LOG_LEVEL: 'info', GITHUB_TOKEN: 'token-value' } });
     });
 
+    it('does not inject disabled managed policy sections', () => {
+        const runtime = buildCodexManagedRuntime({
+            groupId: 'dev',
+            groupName: 'Development',
+            policy: {
+                revision: 1,
+                enabled: true,
+                syncBaseConfig: false,
+                syncMcpServers: false,
+                syncSkills: false,
+                baseConfig: { model_reasoning_effort: 'high' },
+                mcpServers: [{ name: 'github', command: 'server', args: [], plainEnv: {}, secretEnv: {} }],
+                skills: [],
+            },
+        });
+        expect(runtime).toEqual({ baseConfig: {}, mcpServers: {} });
+    });
+
+    it('does not inject anything when the policy master switch is disabled', () => {
+        const runtime = buildCodexManagedRuntime({
+            groupId: 'dev',
+            groupName: 'Development',
+            policy: {
+                revision: 1,
+                enabled: false,
+                syncBaseConfig: true,
+                syncMcpServers: true,
+                syncSkills: true,
+                baseConfig: { model_reasoning_effort: 'high' },
+                mcpServers: [{ name: 'github', command: 'server', args: [], plainEnv: {}, secretEnv: {} }],
+                skills: [],
+            },
+        });
+        expect(runtime).toEqual({ baseConfig: {}, mcpServers: {} });
+    });
+
     it('materializes local skills only inside the managed subtree', async () => {
         const root = await mkdtemp(join(tmpdir(), 'happy-codex-skills-'));
         const source = join(root, 'source');
@@ -48,7 +88,14 @@ describe('Codex managed policy', () => {
 
         await materializeCodexManagedSkills(CodexPolicyAssignmentSchema.parse({
             groupId: 'dev', groupName: 'Development',
-            policy: { revision: 1, skills: [{ id: 'review', name: 'review', enabled: true, source: { kind: 'local', path: source } }] },
+            policy: {
+                revision: 1,
+                enabled: true,
+                syncBaseConfig: false,
+                syncMcpServers: false,
+                syncSkills: true,
+                skills: [{ id: 'review', name: 'review', enabled: true, source: { kind: 'local', path: source } }],
+            },
         }), codexHome);
 
         expect(await readFile(join(codexHome, 'skills', '.happy-managed', 'review', 'SKILL.md'), 'utf8')).toBe('# Review\n');

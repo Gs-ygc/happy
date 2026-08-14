@@ -111,6 +111,12 @@ function findSensitiveConfigPath(value: unknown, path: Array<string | number> = 
 
 export const CodexDevicePolicySchema = z.object({
     revision: z.number().int().nonnegative(),
+    // Managed Codex behavior is opt-in. These defaults intentionally protect
+    // existing local config until the user explicitly enables a policy.
+    enabled: z.boolean().default(false),
+    syncBaseConfig: z.boolean().default(false),
+    syncMcpServers: z.boolean().default(false),
+    syncSkills: z.boolean().default(false),
     baseConfig: z.record(z.string().min(1).max(256), z.unknown()).default({}),
     mcpServers: z.array(CodexMcpServerSchema).max(100).default([]),
     skills: z.array(CodexManagedSkillSchema).max(100).default([]),

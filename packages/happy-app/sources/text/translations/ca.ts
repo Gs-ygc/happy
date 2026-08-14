@@ -1068,6 +1068,8 @@ export const ca: TranslationStructure = {
         noTasksDescription: 'Inicia una sessió des de la pestanya Terminals per crear una tasca.',
         otherProjects: 'Altres',
         statusThinking: 'Pensant',
+        statusStreaming: 'Sortida en streaming',
+        statusTool: 'Executant eina',
         statusPermission: 'Permís requerit',
         statusRunning: 'En execució',
         statusIdle: 'Inactiu',

@@ -1096,6 +1096,8 @@ export const en: TranslationStructure = {
         statusThinking: 'Thinking',
         statusPermission: 'Permission required',
         statusRunning: 'Running',
+        statusStreaming: 'Streaming',
+        statusTool: 'Running tool',
         statusIdle: 'Idle',
         pending: 'Pending',
         statusPending: 'Pending submission',

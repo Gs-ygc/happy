@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CodexPolicyAssignmentSchema } from '@slopus/happy-wire';
+import { CodexPolicyAssignmentSchema, type SessionActivityState } from '@slopus/happy-wire';
 
 //
 // Agent states
@@ -273,6 +273,7 @@ export interface Session {
     agentStateVersion: number,
     thinking: boolean,
     thinkingAt: number,
+    activityState?: SessionActivityState,
     presence: "online" | number, // "online" when active, timestamp when last seen
     todos?: TodoItem[];
     draft?: string | null; // Local draft message, not synced to server

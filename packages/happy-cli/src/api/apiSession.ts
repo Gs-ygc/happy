@@ -13,7 +13,7 @@ import { RpcHandlerManager } from './rpc/RpcHandlerManager';
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers';
 import { calculateCost } from '@/utils/pricing';
 import { shouldReconnect } from '@/utils/lidState';
-import { createEnvelope, type CreateEnvelopeOptions, type SessionEnvelope, type SessionTurnEndStatus } from '@slopus/happy-wire';
+import { createEnvelope, type CreateEnvelopeOptions, type SessionActivityState, type SessionEnvelope, type SessionTurnEndStatus } from '@slopus/happy-wire';
 import {
     closeClaudeTurnWithStatus,
     mapClaudeLogMessageToSessionEnvelopes,
@@ -852,7 +852,7 @@ export class ApiSessionClient extends EventEmitter {
     /**
      * Send a ping message to keep the connection alive
      */
-    keepAlive(thinking: boolean, mode: 'local' | 'remote') {
+    keepAlive(thinking: boolean, mode: 'local' | 'remote', activityState: SessionActivityState = thinking ? 'thinking' : 'idle') {
         if (process.env.DEBUG) { // too verbose for production
             logger.debug(`[API] Sending keep alive message: ${thinking}`);
         }
@@ -860,7 +860,8 @@ export class ApiSessionClient extends EventEmitter {
             sid: this.sessionId,
             time: Date.now(),
             thinking,
-            mode
+            mode,
+            activityState,
         });
     }
 

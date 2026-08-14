@@ -284,7 +284,16 @@ export default function MachineDetailScreen() {
             name: name.trim(),
             machineIds: [],
             membershipRevision: 0,
-            policy: { revision: 1, baseConfig: {}, mcpServers: [], skills: [] },
+            policy: {
+                revision: 1,
+                enabled: false,
+                syncBaseConfig: false,
+                syncMcpServers: false,
+                syncSkills: false,
+                baseConfig: {},
+                mcpServers: [],
+                skills: [],
+            },
         };
         const withGroup = upsertCodexDeviceGroup(settings.codexDeviceGroups, group);
         setIsApplyingCodexGroup(true);

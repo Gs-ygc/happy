@@ -1070,6 +1070,8 @@ export const ja: TranslationStructure = {
         noTasksDescription: '「ターミナル」タブからセッションを開始するとタスクが作成されます。',
         otherProjects: 'その他',
         statusThinking: '思考中',
+        statusStreaming: 'ストリーミング出力中',
+        statusTool: 'ツール実行中',
         statusPermission: '権限が必要',
         statusRunning: '実行中',
         statusIdle: '待機中',

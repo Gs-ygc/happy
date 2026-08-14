@@ -1069,6 +1069,8 @@ export const es: TranslationStructure = {
         noTasksDescription: 'Inicia una sesión desde la pestaña Terminales para crear una tarea.',
         otherProjects: 'Otros',
         statusThinking: 'Pensando',
+        statusStreaming: 'Transmitiendo',
+        statusTool: 'Ejecutando herramienta',
         statusPermission: 'Permiso requerido',
         statusRunning: 'En ejecución',
         statusIdle: 'Inactivo',

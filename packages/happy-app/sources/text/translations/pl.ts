@@ -1098,6 +1098,8 @@ export const pl: TranslationStructure = {
         noTasksDescription: 'Uruchom sesję z zakładki Terminale, aby utworzyć zadanie.',
         otherProjects: 'Inne',
         statusThinking: 'Myśli',
+        statusStreaming: 'Strumieniowanie',
+        statusTool: 'Uruchamianie narzędzia',
         statusPermission: 'Wymagana zgoda',
         statusRunning: 'W trakcie',
         statusIdle: 'Bezczynny',

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CodexPolicyAssignmentSchema, type Update, type UpdateMachineBody } from '@slopus/happy-wire';
+import { CodexPolicyAssignmentSchema, type SessionActivityState, type Update, type UpdateMachineBody } from '@slopus/happy-wire';
 import { UsageSchema } from '@/claude/types'
 import type { SandboxConfig } from '@/persistence'
 
@@ -64,6 +64,7 @@ export interface ClientToServerEvents {
     time: number;
     thinking: boolean;
     mode?: 'local' | 'remote';
+    activityState?: SessionActivityState;
   }) => void
   'session-end': (data: { sid: string, time: number }) => void,
   'update-metadata': (data: { sid: string, expectedVersion: number, metadata: string }, cb: (answer: {

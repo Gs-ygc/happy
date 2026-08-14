@@ -1067,6 +1067,8 @@ export const pt: TranslationStructure = {
         noTasksDescription: 'Inicie uma sessão na aba Terminais para criar uma tarefa.',
         otherProjects: 'Outros',
         statusThinking: 'Pensando',
+        statusStreaming: 'Saída em streaming',
+        statusTool: 'Executando ferramenta',
         statusPermission: 'Permissão necessária',
         statusRunning: 'Em execução',
         statusIdle: 'Ocioso',

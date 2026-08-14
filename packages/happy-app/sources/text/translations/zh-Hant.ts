@@ -1078,6 +1078,8 @@ export const zhHant: TranslationStructure = {
         noTasksDescription: '在「終端」頁新增工作階段即可建立任務。',
         otherProjects: '其他',
         statusThinking: '思考中',
+        statusStreaming: '串流輸出中',
+        statusTool: '工具執行中',
         statusPermission: '等待權限',
         statusRunning: '執行中',
         statusIdle: '閒置中',

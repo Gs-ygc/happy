@@ -3002,7 +3002,8 @@ class Sync {
                     active: update.active,
                     activeAt: update.activeAt,
                     thinking: update.thinking ?? false,
-                    thinkingAt: update.activeAt // Always use activeAt for consistency
+                    thinkingAt: update.activeAt, // Always use activeAt for consistency
+                    activityState: update.activityState ?? (update.thinking ? 'thinking' : 'idle'),
                 });
             }
         }
