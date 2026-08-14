@@ -58,7 +58,7 @@ import {
 import { isRunningOnMac } from '@/utils/platform';
 import { getNewSessionSidebarLayout } from '@/utils/newSessionSidebarLayout';
 import { getAgentPickerItems, getModePickerItems } from '@/utils/newSessionPickerItems';
-import { filterPathSuggestions, getDirectoryPathSuggestions, getPathAutocompleteRequest } from '@/utils/newSessionPathAutocomplete';
+import { filterPathSuggestions, getDirectoryPathSuggestions, getPathAutocompleteRequest, getPathSuggestionValue } from '@/utils/newSessionPathAutocomplete';
 import { resolveAgentDefaultConfig } from '@/sync/agentDefaults';
 
 // Agent icon assets
@@ -203,8 +203,8 @@ function BottomSheet({
             onRequestClose={onClose}
         >
             <KeyboardAvoidingView
-                behavior="height"
-                keyboardVerticalOffset={0}
+                behavior="padding"
+                keyboardVerticalOffset={safeArea.bottom}
                 style={sheetStyles.overlay}
             >
                 <TouchableWithoutFeedback onPress={onClose}>
@@ -421,7 +421,7 @@ function PathPickerContent({
     }, [currentValue, directoryItems, homeDir, items]);
 
     const handleSuggestionPress = React.useCallback((item: PickerItem) => {
-        const nextValue = item.label;
+        const nextValue = getPathSuggestionValue(item);
         const nextSelection = { start: nextValue.length, end: nextValue.length };
 
         onChangeValue(nextValue);
@@ -783,19 +783,13 @@ function NewSessionScreen() {
         }
     }, [worktreeItems, worktreeKey]);
 
-    // Filter available agents based on CLI availability from machine metadata
-    const availableAgents = React.useMemo(() => {
-        const availability = selectedMachine?.metadata?.cliAvailability;
-        if (!availability) return ALL_AGENTS;
-        return ALL_AGENTS.filter(a => availability[a.key]);
-    }, [selectedMachine]);
-
-    // If current agent not available on this machine, switch to first available
-    React.useEffect(() => {
-        if (availableAgents.length > 0 && !availableAgents.find(a => a.key === selectedAgent)) {
-            setSelectedAgent(availableAgents[0].key);
-        }
-    }, [availableAgents, selectedAgent, setSelectedAgent]);
+    // Detection is advisory and can be stale when a daemon was launched from a
+    // different PATH. Keep every agent selectable and surface the detection
+    // result in the picker instead of silently changing the user's choice.
+    const agentPickerItems = React.useMemo(
+        () => getAgentPickerItems(ALL_AGENTS, selectedMachine?.metadata?.cliAvailability),
+        [selectedMachine?.metadata?.cliAvailability],
+    );
 
     // Derive options from agent type
     const permissionModes = React.useMemo<PermissionMode[]>(
@@ -889,7 +883,7 @@ function NewSessionScreen() {
     }, []);
 
     const isOffline = selectedMachine ? !isMachineOnline(selectedMachine) : false;
-    const agent = availableAgents.find(a => a.key === selectedAgent) ?? ALL_AGENTS[0];
+    const agent = ALL_AGENTS.find(a => a.key === selectedAgent) ?? ALL_AGENTS[0];
     const currentPermission = permissionModes[permissionIndex] ?? permissionModes[0];
     const currentEffort = effortLevels[effortIndex] ?? effortLevels[0];
     const permissionStyle = currentPermission?.key !== 'default' ? getPermissionStyle(currentPermission.key) : null;
@@ -913,7 +907,7 @@ function NewSessionScreen() {
             case 'worktree':
                 return { title: 'Worktree', fixedItems: WORKTREE_FIXED_ITEMS, items: worktreeItems, selectedKey: worktreeKey, searchPlaceholder: 'search worktrees...' };
             case 'agent':
-                return { title: 'Agent', items: getAgentPickerItems(availableAgents), selectedKey: selectedAgent, searchPlaceholder: 'search agents...' };
+                return { title: 'Agent', items: agentPickerItems, selectedKey: selectedAgent, searchPlaceholder: 'search agents...' };
             case 'model':
                 return { title: 'Model', items: getModePickerItems(modelModes), selectedKey: currentModelKey, searchPlaceholder: 'search models...' };
             case 'effort':
@@ -925,7 +919,7 @@ function NewSessionScreen() {
         }
     }, [
         activePicker,
-        availableAgents,
+        agentPickerItems,
         currentEffort?.key,
         currentModelKey,
         currentPermission?.key,
@@ -948,7 +942,7 @@ function NewSessionScreen() {
                 setWorktreeKey(key);
                 break;
             case 'agent':
-                if (availableAgents.some((candidate) => candidate.key === key)) {
+                if (ALL_AGENTS.some((candidate) => candidate.key === key)) {
                     setSelectedAgent(key as NewSessionAgentType);
                 }
                 break;
@@ -980,7 +974,6 @@ function NewSessionScreen() {
         setActivePicker(null);
     }, [
         activePicker,
-        availableAgents,
         draft.setEffortLevel,
         draft.setModelMode,
         draft.setPermissionMode,
@@ -1637,7 +1630,7 @@ const styles = StyleSheet.create((theme) => ({
         left: 0,
         right: 0,
         bottom: 0,
-        zIndex: -1,
+        zIndex: 1,
     },
     configBox: {
         backgroundColor: theme.colors.input.background,
@@ -1648,6 +1641,8 @@ const styles = StyleSheet.create((theme) => ({
     },
     configBoxWithPopover: {
         overflow: 'visible',
+        position: 'relative',
+        zIndex: 2,
     },
     sidebarConfigBox: {
         backgroundColor: 'transparent',

@@ -12,6 +12,16 @@ describe('new session picker items', () => {
         ]);
     });
 
+    it('keeps agent choices visible when machine detection says one is unavailable', () => {
+        expect(getAgentPickerItems([
+            { key: 'claude', label: 'claude code' },
+            { key: 'codex', label: 'codex' },
+        ], { claude: false, codex: true })).toEqual([
+            { key: 'claude', label: 'claude code', subtitle: 'not detected on machine', dimmed: true },
+            { key: 'codex', label: 'codex' },
+        ]);
+    });
+
     it('maps model, effort, and permission options with descriptions', () => {
         expect(getModePickerItems([
             { key: 'default', name: 'default model', description: null },

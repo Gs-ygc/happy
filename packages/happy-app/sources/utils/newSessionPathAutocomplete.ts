@@ -6,6 +6,10 @@ export type PathSuggestionItem = {
     subtitle?: string;
 };
 
+export function getPathSuggestionValue(item: PathSuggestionItem): string {
+    return item.key;
+}
+
 export type PathAutocompleteRequest = {
     queryPath: string;
     parentDisplay: string;

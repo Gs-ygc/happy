@@ -3,6 +3,7 @@ import {
     filterPathSuggestions,
     getDirectoryPathSuggestions,
     getPathAutocompleteRequest,
+    getPathSuggestionValue,
 } from './newSessionPathAutocomplete';
 
 describe('new-session path autocomplete', () => {
@@ -52,5 +53,9 @@ describe('new-session path autocomplete', () => {
         ], normalize)).toEqual([
             { key: '~/happy', label: '~/happy' },
         ]);
+    });
+
+    it('uses the canonical path key when selecting a displayed relative suggestion', () => {
+        expect(getPathSuggestionValue({ key: '/home/user/projects/happy', label: '~/projects/happy' })).toBe('/home/user/projects/happy');
     });
 });
