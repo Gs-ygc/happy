@@ -24,7 +24,7 @@ import type { CodexDeviceGroup } from '@slopus/happy-wire';
 import { assignMachineToCodexDeviceGroup, removeCodexDeviceGroup, resolveCodexPolicyAssignment, upsertCodexDeviceGroup } from '@/sync/codexDeviceGroups';
 import { CodexPolicyEditor } from '@/components/CodexPolicyEditor';
 import { fetchLatestHappyCliRelease, isHappySelfUpdateSupported } from '@/sync/happyUpdate';
-import { classifyHappyUpdateRetry, runHappyUpdateBatch, summarizeHappyUpdateBatch, type HappyUpdateBatchResult } from '@/sync/happyUpdateBatch';
+import { classifyHappyUpdateRetry, HappyUpdateBatchTimeoutError, runHappyUpdateBatch, summarizeHappyUpdateBatch, type HappyUpdateBatchResult } from '@/sync/happyUpdateBatch';
 import { loadHappyDeviceUpdate, loadHappyGroupUpdate, saveHappyDeviceUpdate, saveHappyGroupUpdate } from '@/sync/happyUpdatePersistence';
 
 const styles = StyleSheet.create((theme) => ({
@@ -415,11 +415,27 @@ export default function MachineDetailScreen() {
         report?: (snapshot: HappyUpdateOperationSnapshot) => void,
         operationId = sync.encryption.generateId(),
     ) => {
-        const started = await machineHappyUpdateStart(target.machineId, {
+        const request = {
             operationId,
             targetVersion: release.version,
             assetUrl: release.assetUrl,
             sha256: release.sha256,
+        };
+        const queuedSnapshot: HappyUpdateOperationSnapshot = {
+            operationId,
+            targetVersion: release.version,
+            phase: 'queued',
+            progress: 0,
+            updatedAt: Date.now(),
+        };
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const started = await Promise.race([
+            machineHappyUpdateStart(target.machineId, request),
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new HappyUpdateBatchTimeoutError(queuedSnapshot)), 30_000);
+            }),
+        ]).finally(() => {
+            if (timer) clearTimeout(timer);
         });
         report?.(started);
         return monitorHappyBatchTarget(target, started, report);

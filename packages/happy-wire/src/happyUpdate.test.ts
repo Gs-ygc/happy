@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+    compareHappySemver,
     HappyUpdateOperationSnapshotSchema,
     HappyUpdatePhaseSchema,
     HappyUpdateRequestSchema,
@@ -21,6 +22,9 @@ const requestForVersion = (targetVersion: string) => ({
 describe('Happy update wire contract', () => {
     it('accepts an exact verified CLI release request', () => {
         expect(HappyUpdateRequestSchema.parse(validRequest)).toEqual(validRequest);
+        expect(compareHappySemver('1.0.0-beta.2', '1.0.0-beta.10')).toBe(-1);
+        expect(compareHappySemver('1.0.0', '1.0.0-beta.10')).toBe(1);
+        expect(() => compareHappySemver('01.0.0', '1.0.0')).toThrow();
     });
 
     it('rejects non-semver targets, non-GitHub assets, and invalid digests', () => {

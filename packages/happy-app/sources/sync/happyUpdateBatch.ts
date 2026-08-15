@@ -21,13 +21,35 @@ export type HappyUpdateBatchResult = {
 
 export type HappyUpdateBatchOptions = {
     concurrency?: number;
+    timeoutMs?: number;
     onResult?: (result: HappyUpdateBatchResult) => void;
 };
+
+export class HappyUpdateBatchTimeoutError extends Error {
+    constructor(public readonly snapshot?: HappyUpdateOperationSnapshot) {
+        super('Happy update operation timed out; continue monitoring with the same operation ID');
+        this.name = 'HappyUpdateBatchTimeoutError';
+    }
+}
 
 type ExecuteHappyUpdate = (
     target: HappyUpdateBatchTarget,
     report?: (snapshot: HappyUpdateOperationSnapshot) => void,
 ) => Promise<HappyUpdateOperationSnapshot>;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, snapshot?: HappyUpdateOperationSnapshot): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new HappyUpdateBatchTimeoutError(snapshot)), timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
 
 function initialResult(target: HappyUpdateBatchTarget): HappyUpdateBatchResult {
     if (!target.online) return { target, status: 'offline' };
@@ -56,10 +78,11 @@ export async function runHappyUpdateBatch(
             results[current.index] = { ...current.result, status: 'updating' };
             emit(results[current.index]);
             try {
-                const snapshot = await execute(current.result.target, (progress) => {
+                const execution = execute(current.result.target, (progress) => {
                     results[current.index] = { ...results[current.index], status: 'updating', snapshot: progress };
                     emit(results[current.index]);
                 });
+                const snapshot = await withTimeout(execution, options.timeoutMs ?? 15 * 60 * 1000, results[current.index].snapshot);
                 const status: HappyUpdateBatchStatus = snapshot.phase === 'completed'
                     ? 'updated'
                     : snapshot.phase === 'recovered'
@@ -76,7 +99,8 @@ export async function runHappyUpdateBatch(
             } catch (error) {
                 results[current.index] = {
                     ...results[current.index],
-                    status: 'failed',
+                    status: error instanceof HappyUpdateBatchTimeoutError ? 'timed-out' : 'failed',
+                    snapshot: error instanceof HappyUpdateBatchTimeoutError ? error.snapshot ?? results[current.index].snapshot : results[current.index].snapshot,
                     error: error instanceof Error ? error.message : String(error),
                 };
             }

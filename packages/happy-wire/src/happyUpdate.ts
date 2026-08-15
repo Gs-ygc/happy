@@ -9,6 +9,37 @@ const REPOSITORY_PATH = '/Gs-ygc/happy/releases/download/';
 export const HappyUpdateOperationIdSchema = z.string().trim()
     .regex(OPERATION_ID, 'operationId contains invalid characters');
 
+export function isHappySemver(value: string): boolean {
+    return SEMVER.test(value);
+}
+
+export function compareHappySemver(left: string, right: string): -1 | 0 | 1 {
+    const parse = (value: string) => {
+        const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(value);
+        if (!match || !isHappySemver(value)) return null;
+        return { core: match.slice(1, 4).map(Number), pre: match[4]?.split('.') ?? [] };
+    };
+    const a = parse(left);
+    const b = parse(right);
+    if (!a || !b) throw new Error('Cannot compare invalid Happy semantic versions');
+    for (let index = 0; index < 3; index++) {
+        if (a.core[index] !== b.core[index]) return a.core[index] < b.core[index] ? -1 : 1;
+    }
+    if (a.pre.length === 0 && b.pre.length === 0) return 0;
+    if (a.pre.length === 0) return 1;
+    if (b.pre.length === 0) return -1;
+    for (let index = 0; index < Math.max(a.pre.length, b.pre.length); index++) {
+        if (a.pre[index] === undefined) return -1;
+        if (b.pre[index] === undefined) return 1;
+        const aNumeric = /^\d+$/.test(a.pre[index]);
+        const bNumeric = /^\d+$/.test(b.pre[index]);
+        if (aNumeric && bNumeric && a.pre[index] !== b.pre[index]) return Number(a.pre[index]) < Number(b.pre[index]) ? -1 : 1;
+        if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+        if (a.pre[index] !== b.pre[index]) return a.pre[index] < b.pre[index] ? -1 : 1;
+    }
+    return 0;
+}
+
 export const HappyUpdateRequestSchema = z.object({
     operationId: HappyUpdateOperationIdSchema,
     targetVersion: z.string().trim().regex(SEMVER, 'targetVersion must be a semantic version'),

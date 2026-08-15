@@ -118,8 +118,7 @@ export async function downloadHappyUpdateAsset(
         const location = response.headers.get('location');
         if (!location || redirect === MAX_REDIRECTS) throw new Error('Happy update download exceeded redirect limit');
         const next = new URL(location, currentUrl);
-        const allowedHost = next.hostname === 'release-assets.githubusercontent.com'
-            || next.hostname.endsWith('.githubusercontent.com');
+        const allowedHost = next.hostname === 'release-assets.githubusercontent.com';
         if (next.protocol !== 'https:' || !allowedHost) throw new Error('Happy update redirect host is not allowed');
         currentUrl = next.toString();
     }

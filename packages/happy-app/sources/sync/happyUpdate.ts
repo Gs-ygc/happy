@@ -1,7 +1,7 @@
-import { compareVersions } from '@/utils/versionUtils';
+import { compareHappySemver, isHappySemver } from '@slopus/happy-wire';
 
 const GITHUB_RELEASES_API = 'https://api.github.com/repos/Gs-ygc/happy/releases?per_page=100';
-const STABLE_SEMVER = /^\d+\.\d+\.\d+$/;
+const isStableSemver = (value: string) => isHappySemver(value) && !value.includes('-');
 const SHA256_DIGEST = /^sha256:([a-f0-9]{64})$/;
 
 export const MIN_HAPPY_SELF_UPDATE_VERSION = '1.2.5';
@@ -41,12 +41,12 @@ function trustedAssetUrl(value: string, version: string): boolean {
 
 export function isHappySelfUpdateSupported(version: string | null | undefined): boolean {
     return typeof version === 'string'
-        && STABLE_SEMVER.test(version)
-        && compareVersions(version, MIN_HAPPY_SELF_UPDATE_VERSION) >= 0;
+        && isStableSemver(version)
+        && compareHappySemver(version, MIN_HAPPY_SELF_UPDATE_VERSION) >= 0;
 }
 
 export function selectLatestHappyCliRelease(payload: unknown, installedVersion: string): HappyCliRelease | null {
-    if (!Array.isArray(payload) || !STABLE_SEMVER.test(installedVersion)) return null;
+    if (!Array.isArray(payload) || !isStableSemver(installedVersion)) return null;
     let selected: HappyCliRelease | null = null;
 
     for (const candidate of payload as GitHubRelease[]) {
@@ -55,7 +55,7 @@ export function selectLatestHappyCliRelease(payload: unknown, installedVersion: 
         const match = /^cli-(\d+\.\d+\.\d+)$/.exec(candidate.tag_name);
         if (!match) continue;
         const version = match[1];
-        if (compareVersions(version, installedVersion) <= 0) continue;
+        if (compareHappySemver(version, installedVersion) <= 0) continue;
         const expectedName = `happy-${version}.tgz`;
         const assets = Array.isArray(candidate.assets) ? candidate.assets as GitHubAsset[] : [];
         const asset = assets.find((item) => item?.name === expectedName
@@ -66,7 +66,7 @@ export function selectLatestHappyCliRelease(payload: unknown, installedVersion: 
         if (!asset || typeof asset.browser_download_url !== 'string' || typeof asset.digest !== 'string') continue;
         const digest = SHA256_DIGEST.exec(asset.digest)?.[1];
         if (!digest) continue;
-        if (!selected || compareVersions(version, selected.version) > 0) {
+        if (!selected || compareHappySemver(version, selected.version) > 0) {
             selected = { version, assetUrl: asset.browser_download_url, sha256: digest };
         }
     }

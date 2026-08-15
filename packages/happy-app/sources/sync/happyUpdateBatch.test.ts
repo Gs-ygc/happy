@@ -95,4 +95,11 @@ describe('Happy update batch coordinator', () => {
         expect(classifyHappyUpdateRetry({ target: target('current'), status: 'already-current' })).toBe('none');
         expect(classifyHappyUpdateRetry({ target: target('bootstrap'), status: 'bootstrap-required' })).toBe('none');
     });
+
+    it('times out a hanging start and keeps the operation snapshot for continuation', async () => {
+        const results = await runHappyUpdateBatch([target('hung')], () => new Promise(() => undefined), { timeoutMs: 10 });
+
+        expect(results[0].status).toBe('timed-out');
+        expect(results[0].error).toContain('timed out');
+    });
 });

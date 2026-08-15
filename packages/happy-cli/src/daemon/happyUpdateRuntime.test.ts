@@ -151,6 +151,16 @@ describe('Happy update runtime validation', () => {
         expect(await hashFileSha256(destination)).toBe('b7f76c6b0c1d0213004e3cf5b2e25f8d2dbc70279d5a02776e6a146b23dfc8ab');
     });
 
+    it('rejects redirects to non-release GitHub asset hosts', async () => {
+        const rootDir = await mkdtemp(join(tmpdir(), 'happy-update-redirect-'));
+        tempDirs.push(rootDir);
+        await expect(downloadHappyUpdateAsset(
+            validWorkerRequest.assetUrl,
+            join(rootDir, 'happy.tgz'),
+            async () => new Response(null, { status: 302, headers: { location: 'https://evil.githubusercontent.com/package.tgz' } }),
+        )).rejects.toThrow(/redirect host/);
+    });
+
     it('records a completed update only after the target daemon version is running', async () => {
         const rootDir = await mkdtemp(join(tmpdir(), 'happy-update-worker-success-'));
         tempDirs.push(rootDir);
