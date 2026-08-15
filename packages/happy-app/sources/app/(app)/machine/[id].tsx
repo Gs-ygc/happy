@@ -24,6 +24,7 @@ import type { CodexDeviceGroup } from '@slopus/happy-wire';
 import { assignMachineToCodexDeviceGroup, removeCodexDeviceGroup, resolveCodexPolicyAssignment, upsertCodexDeviceGroup } from '@/sync/codexDeviceGroups';
 import { CodexPolicyEditor } from '@/components/CodexPolicyEditor';
 import { fetchLatestHappyCliRelease, isHappySelfUpdateSupported } from '@/sync/happyUpdate';
+import { runHappyUpdateBatch, summarizeHappyUpdateBatch, type HappyUpdateBatchResult } from '@/sync/happyUpdateBatch';
 
 const styles = StyleSheet.create((theme) => ({
     pathInputContainer: {
@@ -90,6 +91,8 @@ export default function MachineDetailScreen() {
     const [isApplyingCodexGroup, setIsApplyingCodexGroup] = useState(false);
     const [happyUpdateOperation, setHappyUpdateOperation] = useState<HappyUpdateOperationSnapshot | null>(null);
     const [isHappyUpdateBusy, setIsHappyUpdateBusy] = useState(false);
+    const [happyBatchResults, setHappyBatchResults] = useState<HappyUpdateBatchResult[]>([]);
+    const [isHappyBatchBusy, setIsHappyBatchBusy] = useState(false);
     // Variant D only
 
     const machineSessions = useMemo(() => {
@@ -317,6 +320,79 @@ export default function MachineDetailScreen() {
             await pollHappyUpdate(machineId, happyUpdateOperation);
         } finally {
             setIsHappyUpdateBusy(false);
+        }
+    };
+
+    const runHappyGroupUpdate = async () => {
+        if (!assignedCodexGroup || isHappyBatchBusy) return;
+        const groupMachines = assignedCodexGroup.machineIds
+            .map((id) => allMachines.find((candidate) => candidate.id === id))
+            .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+        if (groupMachines.length === 0) {
+            Modal.alert('No devices in group', 'Assign devices to this group before starting a batch update.');
+            return;
+        }
+        setIsHappyBatchBusy(true);
+        setHappyBatchResults([]);
+        try {
+            const release = await fetchLatestHappyCliRelease('0.0.0');
+            if (!release) {
+                Modal.alert('Happy CLI is current', 'No newer stable Happy CLI release is available.');
+                return;
+            }
+            const confirmed = await Modal.confirm(
+                `Update Happy on ${assignedCodexGroup.name}?`,
+                `Online supported devices will update to Happy CLI ${release.version}. Offline and bootstrap-required devices will be reported without changes.`,
+                { confirmText: 'Update group' },
+            );
+            if (!confirmed) return;
+
+            const targets = groupMachines.map((candidate) => ({
+                machineId: candidate.id,
+                name: candidate.metadata?.displayName || candidate.metadata?.host || candidate.id,
+                online: isMachineOnline(candidate),
+                installedVersion: candidate.metadata?.happyCliVersion || candidate.daemonState?.startedWithCliVersion,
+                targetVersion: release.version,
+            }));
+            const results = await runHappyUpdateBatch(targets, async (target, report) => {
+                const started = await machineHappyUpdateStart(target.machineId, {
+                    operationId: sync.encryption.generateId(),
+                    targetVersion: release.version,
+                    assetUrl: release.assetUrl,
+                    sha256: release.sha256,
+                });
+                report?.(started);
+                let snapshot = started;
+                for (let attempt = 0; attempt < 400 && !['completed', 'failed', 'recovered'].includes(snapshot.phase); attempt++) {
+                    await new Promise((resolve) => setTimeout(resolve, 1500));
+                    try {
+                        const next = await machineHappyUpdateStatus(target.machineId, snapshot.operationId);
+                        if (next) {
+                            snapshot = next;
+                            report?.(next);
+                        }
+                    } catch {
+                        // The target daemon is expected to disconnect during replacement.
+                    }
+                }
+                return snapshot;
+            }, {
+                concurrency: 3,
+                onResult: (result) => setHappyBatchResults((previous) => {
+                    const next = previous.filter((item) => item.target.machineId !== result.target.machineId);
+                    return [...next, result];
+                }),
+            });
+            setHappyBatchResults(results);
+            const summary = summarizeHappyUpdateBatch(results);
+            Modal.alert(
+                'Happy group update finished',
+                `${summary.updated} updated, ${summary.alreadyCurrent} already current, ${summary.offline} offline, ${summary.bootstrapRequired} need bootstrap, ${summary.recovered} rolled back, ${summary.failed} failed.`,
+            );
+        } catch (error) {
+            Modal.alert(t('common.error'), error instanceof Error ? error.message : 'Group update could not be started.');
+        } finally {
+            setIsHappyBatchBusy(false);
         }
     };
 
@@ -936,6 +1012,33 @@ export default function MachineDetailScreen() {
                                     disabled={isApplyingCodexGroup}
                                     rightElement={<Ionicons name="options-outline" size={21} color={theme.colors.textSecondary} />}
                                 />
+                                <Item
+                                    title="Update Happy on group"
+                                    subtitle={isHappyBatchBusy
+                                        ? 'Updating up to three devices at a time'
+                                        : 'Update Happy CLI and restart each online device'}
+                                    onPress={() => void runHappyGroupUpdate()}
+                                    disabled={isHappyBatchBusy}
+                                    rightElement={isHappyBatchBusy
+                                        ? <ActivityIndicator size="small" />
+                                        : <Ionicons name="cloud-download-outline" size={21} color={theme.colors.textSecondary} />}
+                                />
+                                {happyBatchResults.map((result) => (
+                                    <Item
+                                        key={`happy-update-${result.target.machineId}`}
+                                        title={result.target.name}
+                                        subtitle={result.snapshot
+                                            ? `${result.status} · ${result.snapshot.phase} (${result.snapshot.progress}%)`
+                                            : result.status}
+                                        subtitleLines={0}
+                                        showChevron={false}
+                                        rightElement={result.status === 'updated'
+                                            ? <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} />
+                                            : result.status === 'failed' || result.status === 'recovered'
+                                                ? <Ionicons name="warning-outline" size={20} color={theme.colors.warning} />
+                                                : undefined}
+                                    />
+                                ))}
                                 <Item
                                     title="Remove from group"
                                     onPress={() => void assignCodexGroup(null)}
