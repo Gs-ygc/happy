@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractCodexResumeFlag } from './cliArgs';
+import { extractCodexPassthroughArgs, extractCodexResumeFlag } from './cliArgs';
 
 describe('extractCodexResumeFlag', () => {
     it('returns null and preserves args when resume flag is absent', () => {
@@ -28,5 +28,23 @@ describe('extractCodexResumeFlag', () => {
         expect(() => extractCodexResumeFlag(['--resume'])).toThrow(
             'Codex resume requires a thread ID: happy codex --resume <thread-id>',
         );
+    });
+});
+
+describe('extractCodexPassthroughArgs', () => {
+    it('keeps every argument on the Happy side without a delimiter', () => {
+        expect(extractCodexPassthroughArgs(['--resume', 'thread-123', '--model', 'gpt-5.6-sol'])).toEqual({
+            happyArgs: ['--resume', 'thread-123', '--model', 'gpt-5.6-sol'],
+            codexArgs: [],
+        });
+    });
+
+    it('forwards only arguments after the first delimiter', () => {
+        expect(extractCodexPassthroughArgs([
+            '--started-by', 'terminal', '--', '--config', 'model="gpt-5.6-sol"', '--', 'value',
+        ])).toEqual({
+            happyArgs: ['--started-by', 'terminal'],
+            codexArgs: ['--config', 'model="gpt-5.6-sol"', '--', 'value'],
+        });
     });
 });

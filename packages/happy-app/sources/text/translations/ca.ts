@@ -453,6 +453,8 @@ export const ca: TranslationStructure = {
             accessibilityLabel: ({ goal }: { goal: string }) => `Objectiu actual: ${goal}`,
             clearGoal: 'Esborra objectiu',
             stopGoal: 'Atura objectiu',
+            pauseGoal: 'Pausa objectiu',
+            resumeGoal: 'Reprèn objectiu',
             editGoal: 'Edita objectiu',
         },
         sessionStatusBar: {

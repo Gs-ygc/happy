@@ -453,6 +453,8 @@ export const zhHant: TranslationStructure = {
             accessibilityLabel: ({ goal }: { goal: string }) => `目前目標：${goal}`,
             clearGoal: '清除目標',
             stopGoal: '停止目標',
+            pauseGoal: '暫停目標',
+            resumeGoal: '繼續目標',
             editGoal: '編輯目標',
         },
         sessionStatusBar: {

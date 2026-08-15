@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     codexGoalActionCapabilities,
+    consumeCodexGoalCommandText,
+    createCodexGoalMutationQueue,
     formatCodexGoalProgressNotification,
     getCodexGoalProgressSnapshot,
     mapCodexGoalEventToAgentGoalStatus,
+    mapCodexGoalEventToAgentGoalStatusV2,
     parseCodexGoalActionParams,
     parseCodexGoalCommand,
+    reportCodexGoalCommandError,
     shouldNotifyCodexGoalProgress,
 } from './codexGoalStatus';
 
@@ -136,12 +140,53 @@ describe('mapCodexGoalEventToAgentGoalStatus', () => {
         });
     });
 
-    it('exposes editable Codex goals when runtime goal actions are supported', () => {
-        expect(codexGoalActionCapabilities(true)).toEqual({
+    it('exposes lifecycle actions that match the provider goal state', () => {
+        expect(codexGoalActionCapabilities(true, 'active')).toEqual({
+            clear: true,
+            edit: true,
+            pause: true,
+        });
+        expect(codexGoalActionCapabilities(true, 'paused')).toEqual({
+            clear: true,
+            edit: true,
+            resume: true,
+        });
+        expect(codexGoalActionCapabilities(true, 'blocked')).toEqual({
             clear: true,
             edit: true,
         });
         expect(codexGoalActionCapabilities(false)).toBeUndefined();
+    });
+
+    it('publishes provider lifecycle details separately from the legacy projection', () => {
+        const event = {
+            type: 'thread_goal_updated',
+            threadId: 'thread-1',
+            goal: {
+                threadId: 'thread-1',
+                objective: 'wait for quota',
+                status: 'paused',
+                tokenBudget: 100,
+                tokensUsed: 50,
+                timeUsedSeconds: 10,
+                updatedAt: 2,
+            },
+        };
+
+        expect(mapCodexGoalEventToAgentGoalStatus(event, 'thread-1', {
+            capabilities: codexGoalActionCapabilities(true, 'paused'),
+        })).toMatchObject({
+            status: 'active',
+            capabilities: { clear: true, edit: true },
+        });
+        expect(mapCodexGoalEventToAgentGoalStatusV2(event, 'thread-1', {
+            capabilities: codexGoalActionCapabilities(true, 'paused'),
+        })).toMatchObject({
+            version: 2,
+            status: 'active',
+            providerStatus: 'paused',
+            capabilities: { clear: true, edit: true, resume: true },
+        });
     });
 
     it('keeps paused and limited Codex goal states visible as current goals', () => {
@@ -257,6 +302,14 @@ describe('parseCodexGoalCommand', () => {
         expect(parseCodexGoalCommand('  /goal   clear  ')).toEqual({
             type: 'clear',
         });
+        expect(parseCodexGoalCommand('/goal pause')).toEqual({
+            type: 'set-status',
+            status: 'paused',
+        });
+        expect(parseCodexGoalCommand('/goal resume')).toEqual({
+            type: 'set-status',
+            status: 'active',
+        });
     });
 
     it('ignores empty goal commands and ordinary text', () => {
@@ -265,14 +318,76 @@ describe('parseCodexGoalCommand', () => {
     });
 });
 
+describe('consumeCodexGoalCommandText', () => {
+    it('consumes a recognized command even when the provider action fails', async () => {
+        const execute = vi.fn().mockRejectedValue(new Error('unsupported runtime'));
+        const onError = vi.fn();
+
+        await expect(consumeCodexGoalCommandText('/goal pause', execute, onError)).resolves.toBe(true);
+        expect(execute).toHaveBeenCalledWith({ type: 'set-status', status: 'paused' });
+        expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'unsupported runtime' }));
+    });
+
+    it('does not consume ordinary model input', async () => {
+        const execute = vi.fn();
+        expect(await consumeCodexGoalCommandText('explain /goal pause', execute)).toBe(false);
+        expect(execute).not.toHaveBeenCalled();
+    });
+});
+
+describe('reportCodexGoalCommandError', () => {
+    it('reports a rejected remote command to both local and session UIs', () => {
+        const reportLocal = vi.fn();
+        const reportSession = vi.fn();
+
+        reportCodexGoalCommandError(new Error('runtime unsupported'), reportLocal, reportSession);
+
+        expect(reportLocal).toHaveBeenCalledWith('Goal action failed: runtime unsupported');
+        expect(reportSession).toHaveBeenCalledWith('Goal action failed: runtime unsupported');
+    });
+});
+
+describe('createCodexGoalMutationQueue', () => {
+    it('serializes mutations from multiple clients', async () => {
+        const order: string[] = [];
+        let releaseFirst!: () => void;
+        const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+        const enqueue = createCodexGoalMutationQueue();
+
+        const first = enqueue(async () => {
+            order.push('first-start');
+            await firstGate;
+            order.push('first-end');
+            return 1;
+        });
+        const second = enqueue(async () => {
+            order.push('second-start');
+            return 2;
+        });
+
+        await vi.waitFor(() => expect(order).toEqual(['first-start']));
+        releaseFirst();
+        await expect(Promise.all([first, second])).resolves.toEqual([1, 2]);
+        expect(order).toEqual(['first-start', 'first-end', 'second-start']);
+    });
+});
+
 describe('parseCodexGoalActionParams', () => {
-    it('parses clear and edit RPC params into Codex goal commands', () => {
+    it('parses lifecycle and edit RPC params into Codex goal commands', () => {
         expect(parseCodexGoalActionParams({ action: 'clear' })).toEqual({
             type: 'clear',
         });
         expect(parseCodexGoalActionParams({ action: 'edit', objective: '  revised goal  ' })).toEqual({
             type: 'set',
             objective: 'revised goal',
+        });
+        expect(parseCodexGoalActionParams({ action: 'pause' })).toEqual({
+            type: 'set-status',
+            status: 'paused',
+        });
+        expect(parseCodexGoalActionParams({ action: 'resume' })).toEqual({
+            type: 'set-status',
+            status: 'active',
         });
     });
 

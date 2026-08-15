@@ -59,6 +59,65 @@ describe('resolveVisibleAgentGoalStatus', () => {
         }));
 
         expect(visible?.text).toBe('review the branch');
+        expect(visible?.providerStatus).toBe('active');
+    });
+
+    it('prefers the matching detailed provider status', () => {
+        const visible = resolveVisibleAgentGoalStatus(sessionWith({
+            agentState: {
+                agentGoalStatus: {
+                    status: 'active',
+                    source: 'codex',
+                    text: 'legacy goal',
+                    observedAt: 10_000,
+                    sourceSessionId: 'codex-thread-1',
+                },
+                agentGoalStatusV2: {
+                    version: 2,
+                    status: 'active',
+                    source: 'codex',
+                    text: 'detailed goal',
+                    observedAt: 11_000,
+                    sourceSessionId: 'codex-thread-1',
+                    providerStatus: 'paused',
+                    capabilities: { resume: true },
+                },
+            },
+        }));
+
+        expect(visible).toMatchObject({
+            text: 'detailed goal',
+            providerStatus: 'paused',
+            capabilities: { resume: true },
+        });
+    });
+
+    it('ignores detailed status from a previous Codex thread', () => {
+        const visible = resolveVisibleAgentGoalStatus(sessionWith({
+            agentState: {
+                agentGoalStatus: {
+                    status: 'active',
+                    source: 'codex',
+                    text: 'current legacy goal',
+                    observedAt: 12_000,
+                    sourceSessionId: 'codex-thread-1',
+                },
+                agentGoalStatusV2: {
+                    version: 2,
+                    status: 'active',
+                    source: 'codex',
+                    text: 'old detailed goal',
+                    observedAt: 13_000,
+                    sourceSessionId: 'old-thread',
+                    providerStatus: 'paused',
+                },
+            },
+        }));
+
+        expect(visible).toMatchObject({
+            text: 'current legacy goal',
+            providerStatus: 'active',
+        });
     });
 
     it('hides inactive, unavailable, and missing goal states', () => {

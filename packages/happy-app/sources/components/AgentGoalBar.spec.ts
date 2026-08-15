@@ -38,6 +38,8 @@ vi.mock('@/text', () => ({
             'components.agentGoalBar.currentGoal': 'Current goal',
             'components.agentGoalBar.clearGoal': 'Clear goal',
             'components.agentGoalBar.stopGoal': 'Stop goal',
+            'components.agentGoalBar.pauseGoal': 'Pause goal',
+            'components.agentGoalBar.resumeGoal': 'Resume goal',
             'components.agentGoalBar.editGoal': 'Edit goal',
         };
         if (key === 'components.agentGoalBar.accessibilityLabel') {
@@ -53,6 +55,7 @@ const goal: VisibleAgentGoalStatus = {
     text: 'finish the current task',
     observedAt: 11_000,
     sourceSessionId: 'claude-session-1',
+    providerStatus: 'active',
 };
 
 type ElementWithProps = React.ReactElement<Record<string, any>>;
@@ -165,18 +168,37 @@ describe('AgentGoalBar', () => {
         expect(findAllByLabel(element, 'Stop goal')).toHaveLength(0);
     });
 
+    it('renders the lifecycle action that matches provider status', async () => {
+        const onAction = vi.fn();
+        const active = await renderGoalBar({
+            goal: { ...goal, providerStatus: 'active', capabilities: { pause: true } },
+            onAction,
+        });
+        const paused = await renderGoalBar({
+            goal: { ...goal, providerStatus: 'paused', capabilities: { resume: true } },
+            onAction,
+        });
+
+        findAllByLabel(active, 'Pause goal')[0].props.onPress();
+        findAllByLabel(paused, 'Resume goal')[0].props.onPress();
+        expect(onAction).toHaveBeenNthCalledWith(1, 'pause');
+        expect(onAction).toHaveBeenNthCalledWith(2, 'resume');
+    });
+
     it('disables the in-flight action button', async () => {
         const onAction = vi.fn();
         const element = await renderGoalBar({
             goal: {
                 ...goal,
-                capabilities: { clear: true },
+                capabilities: { clear: true, edit: true },
             },
             onAction,
             inFlightAction: 'clear',
         });
 
         const clearButton = findAllByLabel(element, 'Clear goal')[0];
+        const editButton = findAllByLabel(element, 'Edit goal')[0];
         expect(clearButton.props.accessibilityState).toEqual({ disabled: true });
+        expect(editButton.props.accessibilityState).toEqual({ disabled: true });
     });
 });

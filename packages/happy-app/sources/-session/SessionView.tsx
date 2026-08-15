@@ -688,6 +688,7 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
         resolveVisibleAgentGoalStatus(session)
     ), [
         session.agentState?.agentGoalStatus,
+        session.agentState?.agentGoalStatusV2,
         session.presence,
         session.metadata?.claudeSessionId,
         session.metadata?.codexThreadId,

@@ -41,7 +41,7 @@ interface SessionModeChangeRequest {
 }
 
 interface SessionGoalActionRequest {
-    action: 'clear' | 'stop' | 'edit';
+    action: 'clear' | 'edit' | 'pause' | 'resume';
     objective?: string;
 }
 

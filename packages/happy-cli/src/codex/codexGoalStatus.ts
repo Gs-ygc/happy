@@ -1,8 +1,9 @@
-import type { AgentGoalStatus } from '@/api/types';
+import type { AgentGoalProviderStatus, AgentGoalStatus, AgentGoalStatusV2 } from '@/api/types';
 import type { ThreadGoal } from './codexAppServerTypes';
 
 type CodexGoalEvent = Record<string, unknown>;
 type AgentGoalCapabilities = NonNullable<Extract<AgentGoalStatus, { status: 'active' }>['capabilities']>;
+type AgentGoalCapabilitiesV2 = NonNullable<Extract<AgentGoalStatusV2, { status: 'active' }>['capabilities']>;
 
 type CodexGoalStatusBase = {
     source: 'codex';
@@ -13,6 +14,7 @@ type CodexGoalStatusBase = {
 
 export type CodexGoalCommand =
     | { type: 'set'; objective: string }
+    | { type: 'set-status'; status: 'active' | 'paused' }
     | { type: 'clear' };
 
 export type CodexGoalProgressSnapshot = {
@@ -44,8 +46,25 @@ function goalRecord(value: unknown): (ThreadGoal & Record<string, unknown>) | nu
         : null;
 }
 
-export function codexGoalActionCapabilities(supported: boolean): AgentGoalCapabilities | undefined {
-    return supported ? { clear: true, edit: true } : undefined;
+export function codexGoalActionCapabilities(
+    supported: boolean,
+    providerStatus: AgentGoalProviderStatus = 'active',
+): AgentGoalCapabilitiesV2 | undefined {
+    if (!supported) return undefined;
+    return {
+        clear: true,
+        edit: true,
+        ...(providerStatus === 'active' ? { pause: true } : {}),
+        ...(providerStatus === 'paused' ? { resume: true } : {}),
+    };
+}
+
+function legacyCapabilities(capabilities: AgentGoalCapabilitiesV2 | undefined): AgentGoalCapabilities | undefined {
+    if (!capabilities) return undefined;
+    return {
+        ...(capabilities.clear !== undefined ? { clear: capabilities.clear } : {}),
+        ...(capabilities.edit !== undefined ? { edit: capabilities.edit } : {}),
+    };
 }
 
 function eventThreadId(message: CodexGoalEvent): string | null {
@@ -68,7 +87,7 @@ function baseStatus(threadId: string, sourceRevision?: string | number): CodexGo
 export function mapCodexGoalEventToAgentGoalStatus(
     message: CodexGoalEvent,
     currentThreadId?: string | null,
-    opts?: { capabilities?: AgentGoalCapabilities },
+    opts?: { capabilities?: AgentGoalCapabilitiesV2 },
 ): AgentGoalStatus | null {
     if (message.type !== 'thread_goal_updated' && message.type !== 'thread_goal_cleared') {
         return null;
@@ -133,6 +152,26 @@ export function mapCodexGoalEventToAgentGoalStatus(
             ...(tokenBudget !== null ? { tokenBudget } : {}),
             ...(timeUsedSeconds !== null ? { timeUsedSeconds } : {}),
         },
+        ...(opts?.capabilities ? { capabilities: legacyCapabilities(opts.capabilities) } : {}),
+    };
+}
+
+export function mapCodexGoalEventToAgentGoalStatusV2(
+    message: CodexGoalEvent,
+    currentThreadId?: string | null,
+    opts?: { capabilities?: AgentGoalCapabilitiesV2 },
+): AgentGoalStatusV2 | null {
+    const legacy = mapCodexGoalEventToAgentGoalStatus(message, currentThreadId, opts);
+    if (!legacy) return null;
+    if (legacy.status !== 'active') {
+        return { ...legacy, version: 2 };
+    }
+
+    const providerStatus = legacy.progress?.state ?? 'active';
+    return {
+        ...legacy,
+        version: 2,
+        providerStatus,
         ...(opts?.capabilities ? { capabilities: opts.capabilities } : {}),
     };
 }
@@ -213,8 +252,50 @@ export function parseCodexGoalCommand(text: string): CodexGoalCommand | null {
     if (objective.toLowerCase() === 'clear') {
         return { type: 'clear' };
     }
+    if (objective.toLowerCase() === 'pause') {
+        return { type: 'set-status', status: 'paused' };
+    }
+    if (objective.toLowerCase() === 'resume') {
+        return { type: 'set-status', status: 'active' };
+    }
 
     return { type: 'set', objective };
+}
+
+export async function consumeCodexGoalCommandText(
+    text: string,
+    execute: (command: CodexGoalCommand) => Promise<void>,
+    onError?: (error: unknown) => void,
+): Promise<boolean> {
+    const command = parseCodexGoalCommand(text);
+    if (!command) return false;
+
+    try {
+        await execute(command);
+    } catch (error) {
+        onError?.(error);
+    }
+    return true;
+}
+
+export function reportCodexGoalCommandError(
+    error: unknown,
+    reportLocal: (message: string) => void,
+    reportSession: (message: string) => void,
+): void {
+    const detail = error instanceof Error ? error.message : String(error);
+    const message = `Goal action failed: ${detail}`;
+    reportLocal(message);
+    reportSession(message);
+}
+
+export function createCodexGoalMutationQueue(): <T>(operation: () => Promise<T>) => Promise<T> {
+    let tail: Promise<void> = Promise.resolve();
+    return function enqueue<T>(operation: () => Promise<T>): Promise<T> {
+        const result = tail.then(operation, operation);
+        tail = result.then(() => undefined, () => undefined);
+        return result;
+    };
 }
 
 export function parseCodexGoalActionParams(params: Record<string, unknown>): CodexGoalCommand | null {
@@ -225,6 +306,14 @@ export function parseCodexGoalActionParams(params: Record<string, unknown>): Cod
     if (params.action === 'edit') {
         const objective = nonEmptyString(params.objective);
         return objective ? { type: 'set', objective } : null;
+    }
+
+    if (params.action === 'pause') {
+        return { type: 'set-status', status: 'paused' };
+    }
+
+    if (params.action === 'resume') {
+        return { type: 'set-status', status: 'active' };
     }
 
     return null;

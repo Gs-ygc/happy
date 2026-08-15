@@ -84,11 +84,14 @@ export function isTaskActivelyWorking(session: Session, now: number = Date.now()
         return true;
     }
     const activityState = session.activityState;
-    if (activityState === 'thinking' || activityState === 'streaming' || activityState === 'tool' || activityState === 'permission' || activityState === 'goal') {
+    if (activityState === 'thinking' || activityState === 'streaming' || activityState === 'tool' || activityState === 'permission') {
         return true;
     }
-    // Goal-mode long tasks stay active even between provider messages.
-    if (resolveVisibleAgentGoalStatus(session) !== null) {
+    const goal = resolveVisibleAgentGoalStatus(session);
+    if (goal) {
+        return goal.providerStatus === 'active';
+    }
+    if (activityState === 'goal') {
         return true;
     }
     // The timestamp is intentionally not used to claim that work is running.
@@ -137,7 +140,8 @@ export function getTaskRunState(session: Session, now: number = Date.now()): Tas
     if (session.activityState === 'streaming') return 'streaming';
     if (session.activityState === 'tool') return 'tool';
     if (session.thinking || session.activityState === 'thinking') return 'thinking';
-    if (session.activityState === 'goal' || resolveVisibleAgentGoalStatus(session) !== null) return 'running';
+    const goal = resolveVisibleAgentGoalStatus(session);
+    if ((session.activityState === 'goal' && !goal) || goal?.providerStatus === 'active') return 'running';
     return 'idle';
 }
 
@@ -208,8 +212,8 @@ export function buildTaskCenterData(
     // Goal-mode work is always first. Within each goal tier, active work stays
     // ahead of idle-but-recent/unread sessions, then recency breaks ties.
     running.sort((a, b) => {
-        const aGoal = a.goal?.status === 'active' ? 1 : 0;
-        const bGoal = b.goal?.status === 'active' ? 1 : 0;
+        const aGoal = a.goal?.providerStatus === 'active' ? 1 : 0;
+        const bGoal = b.goal?.providerStatus === 'active' ? 1 : 0;
         if (aGoal !== bGoal) return bGoal - aGoal;
         const statePriority: Record<TaskRunState, number> = {
             thinking: 0,

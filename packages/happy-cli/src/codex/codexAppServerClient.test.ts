@@ -163,6 +163,20 @@ describe('CodexAppServerClient sandbox integration', () => {
         await client.disconnect();
     });
 
+    it('places forwarded Codex flags before the app-server subcommand', async () => {
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient(undefined, ['--config', 'model="gpt-5.6-sol"']);
+
+        await client.connect();
+
+        expect(mockSpawn).toHaveBeenCalledWith(
+            'codex',
+            ['--config', 'model="gpt-5.6-sol"', 'app-server', '--listen', 'stdio://'],
+            expect.anything(),
+        );
+        await client.disconnect();
+    });
+
     it('falls back to non-sandbox transport when sandbox initialization fails', async () => {
         mockInitializeSandbox.mockRejectedValue(new Error('sandbox init failed'));
         const { CodexAppServerClient } = await import('./codexAppServerClient');
@@ -1605,6 +1619,10 @@ describe('CodexAppServerClient sandbox integration', () => {
                 status: 'active',
             },
         });
+        await client.setGoal({
+            threadId: 'thread-goal-1',
+            status: 'paused',
+        });
         await expect(client.clearGoal({
             threadId: 'thread-goal-1',
         })).resolves.toEqual({ cleared: true });
@@ -1621,6 +1639,13 @@ describe('CodexAppServerClient sandbox integration', () => {
                 method: 'thread/goal/clear',
                 params: {
                     threadId: 'thread-goal-1',
+                },
+            }),
+            expect.objectContaining({
+                method: 'thread/goal/set',
+                params: {
+                    threadId: 'thread-goal-1',
+                    status: 'paused',
                 },
             }),
         ]));

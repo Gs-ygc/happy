@@ -58,6 +58,7 @@ import {
     type CodexEnhancedMode,
 } from './codexPrompt';
 import { discoverCodexSkillCommands } from './codexSkills';
+import { reduceCodexActivityState, type CodexActivitySignal } from './codexActivityState';
 import {
     buildCodexManagedRuntime,
     codexManagedPolicyPath,
@@ -65,11 +66,14 @@ import {
 } from './codexManagedPolicy';
 import {
     codexGoalActionCapabilities,
+    consumeCodexGoalCommandText,
+    createCodexGoalMutationQueue,
     mapCodexGoalEventToAgentGoalStatus,
+    mapCodexGoalEventToAgentGoalStatusV2,
     formatCodexGoalProgressNotification,
     getCodexGoalProgressSnapshot,
     parseCodexGoalActionParams,
-    parseCodexGoalCommand,
+    reportCodexGoalCommandError,
     shouldNotifyCodexGoalProgress,
     type CodexGoalProgressSnapshot,
     type CodexGoalCommand,
@@ -132,6 +136,7 @@ export async function runCodex(opts: {
     permissionMode?: PermissionMode;
     model?: string;
     effort?: ReasoningEffort;
+    codexCliArgs?: string[];
 }): Promise<void> {
     // Early check: ensure Codex CLI is installed before proceeding
     try {
@@ -453,6 +458,9 @@ export async function runCodex(opts: {
         thinking = next === 'thinking' || next === 'streaming' || next === 'tool' || next === 'goal';
         session.keepAlive(thinking, 'remote', activityState);
     };
+    const publishActivitySignal = (signal: CodexActivitySignal) => {
+        publishActivity(reduceCodexActivityState(activityState, signal));
+    };
     publishActivity('idle');
     // Periodic keep-alive; store handle so we can clear on exit
     const keepAliveInterval = setInterval(() => {
@@ -694,7 +702,7 @@ export async function runCodex(opts: {
     // Start Context 
     //
 
-    client = new CodexAppServerClient(sandboxConfig);
+    client = new CodexAppServerClient(sandboxConfig, opts.codexCliArgs);
 
     permissionHandler = new CodexPermissionHandler(session, ({ toolCallId, toolName }) => {
         try {
@@ -744,8 +752,14 @@ export async function runCodex(opts: {
         }
     });
     let lastGoalProgressNotification: { snapshot: CodexGoalProgressSnapshot; sentAt: number } | null = null;
+    let hasActiveProviderGoal = false;
     const updateCodexGoalState = (message: Record<string, unknown>) => {
-        const capabilities = codexGoalActionCapabilities(client.supportsGoalActions());
+        const providerStatus = message.type === 'thread_goal_updated'
+            && message.goal && typeof message.goal === 'object'
+            && typeof (message.goal as Record<string, unknown>).status === 'string'
+            ? (message.goal as Record<string, unknown>).status as Parameters<typeof codexGoalActionCapabilities>[1]
+            : 'active';
+        const capabilities = codexGoalActionCapabilities(client.supportsGoalActions(), providerStatus);
         const goalStatus = mapCodexGoalEventToAgentGoalStatus(
             message,
             client.threadId,
@@ -754,10 +768,18 @@ export async function runCodex(opts: {
         if (!goalStatus) {
             return;
         }
+        const goalStatusV2 = mapCodexGoalEventToAgentGoalStatusV2(
+            message,
+            client.threadId,
+            capabilities ? { capabilities } : undefined,
+        );
         session.updateAgentState((currentState) => ({
             ...currentState,
             agentGoalStatus: goalStatus,
+            ...(goalStatusV2 ? { agentGoalStatusV2: goalStatusV2 } : {}),
         }));
+        hasActiveProviderGoal = goalStatusV2?.status === 'active'
+            && goalStatusV2.providerStatus === 'active';
         if (goalStatus.status !== 'active') {
             if (activityState === 'goal') {
                 publishActivity('idle');
@@ -765,7 +787,11 @@ export async function runCodex(opts: {
             lastGoalProgressNotification = null;
             return;
         }
-        publishActivity('goal');
+        if (goalStatusV2?.status === 'active' && goalStatusV2.providerStatus === 'active') {
+            publishActivity('goal');
+        } else if (activityState === 'goal') {
+            publishActivity('idle');
+        }
 
         const snapshot = getCodexGoalProgressSnapshot(goalStatus);
         if (!snapshot) {
@@ -798,39 +824,37 @@ export async function runCodex(opts: {
             }
         }
     };
-    const handleCodexGoalCommand = async (
+    const goalMutationQueue = createCodexGoalMutationQueue();
+    const executeCodexGoalCommand = async (
         command: CodexGoalCommand,
         threadId: string,
-    ): Promise<boolean> => {
-        try {
-            if (command.type === 'clear') {
-                const result = await client.clearGoal({ threadId });
-                if (result.cleared !== false) {
-                    updateCodexGoalState({
-                        type: 'thread_goal_cleared',
-                        threadId,
-                    });
-                }
-                messageBuffer.addMessage('Goal cleared', 'status');
-                return true;
+    ): Promise<void> => {
+        if (command.type === 'clear') {
+            const result = await client.clearGoal({ threadId });
+            if (result.cleared !== false) {
+                updateCodexGoalState({
+                    type: 'thread_goal_cleared',
+                    threadId,
+                });
             }
-
-            const result = await client.setGoal({
-                threadId,
-                objective: command.objective,
-            });
-            updateCodexGoalState({
-                type: 'thread_goal_updated',
-                threadId,
-                goal: result.goal,
-            });
-            messageBuffer.addMessage('Goal updated', 'status');
-            return true;
-        } catch (error) {
-            logger.debug('[Codex] Goal command API failed; falling back to normal turn:', error);
-            return false;
+            messageBuffer.addMessage('Goal cleared', 'status');
+            return;
         }
+
+        const result = command.type === 'set-status'
+            ? await client.setGoal({ threadId, status: command.status })
+            : await client.setGoal({ threadId, objective: command.objective });
+        updateCodexGoalState({
+            type: 'thread_goal_updated',
+            threadId,
+            goal: result.goal,
+        });
+        messageBuffer.addMessage('Goal updated', 'status');
     };
+    const handleCodexGoalCommand = (
+        command: CodexGoalCommand,
+        threadId: string,
+    ): Promise<void> => goalMutationQueue(() => executeCodexGoalCommand(command, threadId));
     session.rpcHandlerManager.registerHandler('goal-action', async (params: Record<string, unknown>) => {
         const command = parseCodexGoalActionParams(params);
         if (!command) {
@@ -842,10 +866,7 @@ export async function runCodex(opts: {
             throw new Error('No active Codex thread');
         }
 
-        const handled = await handleCodexGoalCommand(command, threadId);
-        if (!handled) {
-            throw new Error('Codex goal actions are not supported by this runtime');
-        }
+        await handleCodexGoalCommand(command, threadId);
 
         return { ok: true };
     });
@@ -899,20 +920,20 @@ export async function runCodex(opts: {
 
         // Add messages to the ink UI buffer based on message type
         if (msg.type === 'agent_message') {
-            publishActivity('streaming');
+            publishActivitySignal('message-streaming');
             messageBuffer.addMessage((msg as any).message, 'assistant');
         } else if (msg.type === 'agent_message_delta') {
-            publishActivity('streaming');
+            publishActivitySignal('message-streaming');
         } else if (msg.type === 'agent_reasoning_delta') {
-            publishActivity('thinking');
+            publishActivitySignal('reasoning');
             // Skip reasoning deltas in the UI to reduce noise
         } else if (msg.type === 'agent_reasoning' && !isSubagentScopedEvent) {
             messageBuffer.addMessage(`[Thinking] ${(msg as any).text.substring(0, 100)}...`, 'system');
         } else if (msg.type === 'exec_command_begin') {
-            publishActivity('tool');
+            publishActivitySignal('command-started');
             messageBuffer.addMessage(`Executing: ${(msg as any).command}`, 'tool');
         } else if (msg.type === 'exec_command_end') {
-            publishActivity('thinking');
+            publishActivitySignal('command-completed');
             const output = (msg as any).output || (msg as any).error || 'Command completed';
             const truncatedOutput = output.substring(0, 200);
             messageBuffer.addMessage(
@@ -920,7 +941,7 @@ export async function runCodex(opts: {
                 'result'
             );
         } else if (msg.type === 'task_started') {
-            publishActivity('thinking');
+            publishActivitySignal('turn-started');
             messageBuffer.addMessage('Starting task...', 'status');
         } else if (msg.type === 'task_complete') {
             // Ready is emitted from the main loop's idle check so pushes only fire once
@@ -953,7 +974,7 @@ export async function runCodex(opts: {
             if (thinking) {
                 logger.debug('thinking completed');
                 thinking = false;
-                publishActivity('idle');
+                publishActivitySignal(msg.type === 'task_complete' ? 'turn-completed' : 'turn-aborted');
             }
             // Reset diff processor on task end or abort
             diffProcessor.reset();
@@ -968,14 +989,14 @@ export async function runCodex(opts: {
             reasoningProcessor.complete((msg as any).text);
         }
         if (msg.type === 'patch_apply_begin') {
-            publishActivity('tool');
+            publishActivitySignal('patch-started');
             const { changes } = msg as any;
             const changeCount = Object.keys(changes).length;
             const filesMsg = changeCount === 1 ? '1 file' : `${changeCount} files`;
             messageBuffer.addMessage(`Modifying ${filesMsg}...`, 'tool');
         }
         if (msg.type === 'patch_apply_end') {
-            publishActivity('thinking');
+            publishActivitySignal('patch-completed');
             const { stdout, stderr, success } = msg as any;
             if (success) {
                 const message = stdout || 'Files modified successfully';
@@ -1145,6 +1166,7 @@ export async function runCodex(opts: {
                 reasoningProcessor.abort();
                 diffProcessor.reset();
                 appendSystemPromptInjected = false;
+                hasActiveProviderGoal = false;
                 thinking = false;
                 publishActivity('idle');
                 messageBuffer.addMessage('Context was reset', 'status');
@@ -1169,6 +1191,9 @@ export async function runCodex(opts: {
             }
 
             try {
+                // Cover connect/resume and the turn/start round trip before
+                // Codex can emit its first lifecycle notification.
+                publishActivitySignal('turn-dispatched');
                 // Map permission mode to approval policy and sandbox.
                 // With app-server, these are per-turn — no restart needed on mode change.
                 const sandboxManagedByHappy = client.sandboxEnabled;
@@ -1217,8 +1242,18 @@ export async function runCodex(opts: {
                     }));
                 }
 
-                const goalCommand = parseCodexGoalCommand(message.message);
-                if (goalCommand && await handleCodexGoalCommand(goalCommand, activeThreadId)) {
+                if (await consumeCodexGoalCommandText(
+                    message.message,
+                    (command) => handleCodexGoalCommand(command, activeThreadId),
+                    (error) => {
+                        logger.debug('[Codex] Goal command API failed:', error);
+                        reportCodexGoalCommandError(
+                            error,
+                            (message) => messageBuffer.addMessage(message, 'status'),
+                            (message) => session.sendSessionEvent({ type: 'message', message }),
+                        );
+                    },
+                )) {
                     continue;
                 }
 
@@ -1282,7 +1317,7 @@ export async function runCodex(opts: {
                 diffProcessor.reset();
                 activeTurnPermissionMode = undefined;
                 thinking = false;
-                publishActivity('idle');
+                publishActivity(hasActiveProviderGoal ? 'goal' : 'idle');
                 emitReadyIfIdle({
                     pending,
                     queueSize: () => messageQueue.size(),

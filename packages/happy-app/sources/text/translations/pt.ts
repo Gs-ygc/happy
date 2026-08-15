@@ -452,6 +452,8 @@ export const pt: TranslationStructure = {
             accessibilityLabel: ({ goal }: { goal: string }) => `Objetivo atual: ${goal}`,
             clearGoal: 'Limpar objetivo',
             stopGoal: 'Parar objetivo',
+            pauseGoal: 'Pausar objetivo',
+            resumeGoal: 'Retomar objetivo',
             editGoal: 'Editar objetivo',
         },
         sessionStatusBar: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AgentGoalStatusSchema, AgentStateSchema, MetadataSchema } from './storageTypes';
+import { AgentGoalStatusSchema, AgentGoalStatusV2Schema, AgentStateSchema, MetadataSchema } from './storageTypes';
 import { rigMetadataFixture } from './__testdata__/rigMetadata';
 
 describe('MetadataSchema', () => {
@@ -173,5 +173,29 @@ describe('AgentGoalStatusSchema', () => {
         });
 
         expect(state.agentGoalStatus?.status).toBe('active');
+    });
+
+    it('preserves detailed provider status and lifecycle capabilities separately', () => {
+        const goal = AgentGoalStatusV2Schema.parse({
+            version: 2,
+            status: 'active',
+            source: 'codex',
+            text: 'wait for quota',
+            observedAt: 1710000000000,
+            sourceSessionId: 'codex-thread-1',
+            providerStatus: 'paused',
+            capabilities: {
+                clear: true,
+                edit: true,
+                resume: true,
+            },
+        });
+        const state = AgentStateSchema.parse({ agentGoalStatusV2: goal });
+
+        expect(state.agentGoalStatusV2).toMatchObject({
+            version: 2,
+            providerStatus: 'paused',
+            capabilities: { resume: true },
+        });
     });
 });

@@ -5,7 +5,7 @@ import * as React from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { useUnistyles } from 'react-native-unistyles';
 
-export type AgentGoalAction = 'clear' | 'stop' | 'edit';
+export type AgentGoalAction = 'clear' | 'edit' | 'pause' | 'resume';
 
 type AgentGoalBarProps = {
     goal: VisibleAgentGoalStatus;
@@ -57,7 +57,8 @@ const ACTION_CONFIG: Array<{
     icon: keyof typeof Ionicons.glyphMap;
 }> = [
     { action: 'edit', capability: 'edit', icon: 'create-outline' },
-    { action: 'stop', capability: 'stop', icon: 'pause-outline' },
+    { action: 'pause', capability: 'pause', icon: 'pause-outline' },
+    { action: 'resume', capability: 'resume', icon: 'play-outline' },
     { action: 'clear', capability: 'clear', icon: 'trash-outline' },
 ];
 
@@ -68,7 +69,8 @@ export function AgentGoalBar(props: AgentGoalBarProps) {
         : [];
     const actionLabels: Record<AgentGoalAction, string> = {
         edit: t('components.agentGoalBar.editGoal'),
-        stop: t('components.agentGoalBar.stopGoal'),
+        pause: t('components.agentGoalBar.pauseGoal'),
+        resume: t('components.agentGoalBar.resumeGoal'),
         clear: t('components.agentGoalBar.clearGoal'),
     };
     const progressText = getGoalProgressText(props.goal);
@@ -147,7 +149,7 @@ export function AgentGoalBar(props: AgentGoalBarProps) {
             {actions.length > 0 && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                     {actions.map((item) => {
-                        const disabled = props.inFlightAction === item.action;
+                        const disabled = props.inFlightAction !== null && props.inFlightAction !== undefined;
                         return (
                             <Pressable
                                 key={item.action}
@@ -167,7 +169,7 @@ export function AgentGoalBar(props: AgentGoalBarProps) {
                                     opacity: disabled ? 0.6 : 1,
                                 })}
                             >
-                                {disabled ? (
+                                {props.inFlightAction === item.action ? (
                                     <ActivityIndicator size="small" color={theme.colors.textSecondary} />
                                 ) : (
                                     <Ionicons name={item.icon} size={16} color={theme.colors.button.secondary.tint} />

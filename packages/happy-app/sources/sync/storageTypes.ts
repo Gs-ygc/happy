@@ -211,6 +211,40 @@ export const AgentGoalStatusSchema = z.discriminatedUnion('status', [
 
 export type AgentGoalStatus = z.infer<typeof AgentGoalStatusSchema>;
 
+export const AgentGoalProviderStatusSchema = z.enum(['active', 'paused', 'blocked', 'usageLimited', 'budgetLimited']);
+
+export const AgentGoalCapabilitiesV2Schema = z.object({
+    clear: z.boolean().optional(),
+    edit: z.boolean().optional(),
+    pause: z.boolean().optional(),
+    resume: z.boolean().optional(),
+}).strict();
+
+const AgentGoalStatusV2BaseSchema = AgentGoalStatusBaseSchema.extend({
+    version: z.literal(2),
+});
+
+export const AgentGoalStatusV2Schema = z.discriminatedUnion('status', [
+    AgentGoalStatusV2BaseSchema.extend({
+        status: z.literal('unavailable'),
+        reason: z.enum(['unsupported', 'not_loaded', 'stale', 'malformed', 'error', 'unknown']).optional(),
+    }).strict(),
+    AgentGoalStatusV2BaseSchema.extend({
+        status: z.literal('inactive'),
+        reason: z.enum(['none', 'cleared', 'completed', 'unknown']).optional(),
+    }).strict(),
+    AgentGoalStatusV2BaseSchema.extend({
+        status: z.literal('active'),
+        sourceSessionId: z.string().trim().min(1),
+        text: z.string().trim().min(1),
+        providerStatus: AgentGoalProviderStatusSchema,
+        capabilities: AgentGoalCapabilitiesV2Schema.optional(),
+        progress: AgentGoalProgressSchema.optional(),
+    }).strict(),
+]);
+
+export type AgentGoalStatusV2 = z.infer<typeof AgentGoalStatusV2Schema>;
+
 export const AgentStateSchema = z.object({
     controlledByUser: z.boolean().nullish(),
     requests: z.record(z.string(), z.object({
@@ -235,6 +269,7 @@ export const AgentStateSchema = z.object({
         toolUseId: z.string().nullish()
     })).nullish(),
     agentGoalStatus: AgentGoalStatusSchema.optional(),
+    agentGoalStatusV2: AgentGoalStatusV2Schema.optional(),
 });
 
 export type AgentState = z.infer<typeof AgentStateSchema>;

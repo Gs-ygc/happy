@@ -105,6 +105,30 @@ describe('isTaskActivelyWorking', () => {
             now,
         )).toBe(false);
     });
+
+    it('does not treat paused or blocked goals as active work', () => {
+        for (const providerStatus of ['paused', 'blocked'] as const) {
+            expect(isTaskActivelyWorking(sessionWith({
+                activityState: 'goal',
+                metadata: {
+                    path: '/tmp/project',
+                    host: 'local',
+                    codexThreadId: 'codex-thread-1',
+                },
+                agentState: {
+                    agentGoalStatusV2: {
+                        version: 2,
+                        status: 'active',
+                        source: 'codex',
+                        text: 'long task',
+                        observedAt: now,
+                        sourceSessionId: 'codex-thread-1',
+                        providerStatus,
+                    },
+                },
+            }), now)).toBe(false);
+        }
+    });
 });
 
 describe('isTaskRunning', () => {
@@ -257,6 +281,42 @@ describe('buildTaskCenterData', () => {
         const data = buildTaskCenterData([recent, goal], noMachines, []);
 
         expect(data.running.map((item) => item.sessionId)).toEqual(['goal-1', 'recent-1']);
+    });
+
+    it('does not rank a paused goal above real active work', () => {
+        const paused = sessionWith({
+            id: 'paused-goal',
+            updatedAt: Date.now(),
+            metadata: {
+                path: '/tmp/project',
+                host: 'local',
+                codexThreadId: 'codex-thread-1',
+            },
+            agentState: {
+                agentGoalStatusV2: {
+                    version: 2,
+                    status: 'active',
+                    source: 'codex',
+                    text: 'paused work',
+                    observedAt: Date.now(),
+                    sourceSessionId: 'codex-thread-1',
+                    providerStatus: 'paused',
+                },
+            },
+        });
+        const thinking = sessionWith({
+            id: 'thinking-work',
+            updatedAt: Date.now() - 1000,
+            activityState: 'thinking',
+        });
+        const data = buildTaskCenterData(
+            [paused, thinking],
+            noMachines,
+            [],
+            new Set(['paused-goal']),
+        );
+
+        expect(data.running.map((item) => item.sessionId)).toEqual(['thinking-work', 'paused-goal']);
     });
 
     it('sorts project groups and their sessions by most recent activity', () => {

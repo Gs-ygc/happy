@@ -368,6 +368,38 @@ export type AgentGoalStatus = {
     }
 );
 
+export type AgentGoalProviderStatus = 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited';
+
+export type AgentGoalStatusV2 = {
+  version: 2,
+  source: 'claude' | 'codex',
+  observedAt: number,
+  sourceSessionId?: string,
+  sourceRevision?: string | number,
+} & (
+  | {
+      status: 'unavailable',
+      reason?: 'unsupported' | 'not_loaded' | 'stale' | 'malformed' | 'error' | 'unknown',
+    }
+  | {
+      status: 'inactive',
+      reason?: 'none' | 'cleared' | 'completed' | 'unknown',
+    }
+  | {
+      status: 'active',
+      sourceSessionId: string,
+      text: string,
+      providerStatus: AgentGoalProviderStatus,
+      capabilities?: {
+        clear?: boolean,
+        edit?: boolean,
+        pause?: boolean,
+        resume?: boolean,
+      },
+      progress?: Extract<AgentGoalStatus, { status: 'active' }>['progress'],
+    }
+);
+
 export type AgentState = {
   controlledByUser?: boolean | null | undefined
   requests?: {
@@ -396,4 +428,5 @@ export type AgentState = {
     }
   }
   agentGoalStatus?: AgentGoalStatus
+  agentGoalStatusV2?: AgentGoalStatusV2
 }

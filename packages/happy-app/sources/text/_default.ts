@@ -496,6 +496,8 @@ export const en = {
             accessibilityLabel: ({ goal }: { goal: string }) => `Current goal: ${goal}`,
             clearGoal: 'Clear goal',
             stopGoal: 'Stop goal',
+            pauseGoal: 'Pause goal',
+            resumeGoal: 'Resume goal',
             editGoal: 'Edit goal',
         },
         sessionStatusBar: {

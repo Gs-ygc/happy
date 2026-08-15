@@ -14,6 +14,7 @@ const DEMO_GOAL: VisibleAgentGoalStatus = {
     text: 'Improve the Codex long-task review experience',
     sourceSessionId: 'demo-codex-thread',
     observedAt: Date.now(),
+    providerStatus: 'active',
     progress: {
         state: 'active',
         tokensUsed: 18_500,

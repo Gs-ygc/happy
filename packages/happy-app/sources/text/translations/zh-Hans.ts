@@ -454,6 +454,8 @@ export const zhHans: TranslationStructure = {
             accessibilityLabel: ({ goal }: { goal: string }) => `当前目标：${goal}`,
             clearGoal: '清除目标',
             stopGoal: '停止目标',
+            pauseGoal: '暂停目标',
+            resumeGoal: '继续目标',
             editGoal: '编辑目标',
         },
         sessionStatusBar: {

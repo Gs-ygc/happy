@@ -469,6 +469,8 @@ export const pl: TranslationStructure = {
             accessibilityLabel: ({ goal }: { goal: string }) => `Bieżący cel: ${goal}`,
             clearGoal: 'Wyczyść cel',
             stopGoal: 'Zatrzymaj cel',
+            pauseGoal: 'Wstrzymaj cel',
+            resumeGoal: 'Wznów cel',
             editGoal: 'Edytuj cel',
         },
         sessionStatusBar: {
