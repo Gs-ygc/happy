@@ -1,5 +1,9 @@
 import { diffLines, diffWordsWithSpace, diffChars } from 'diff';
 
+// Avoid synchronous quadratic/cubic work for minified JSON, SVG and other
+// generated lines. Long pairs still render as add/remove without inline tokens.
+const MAX_INLINE_DIFF_LINE_LENGTH = 200;
+
 export interface DiffToken {
     value: string;
     added?: boolean;
@@ -139,6 +143,9 @@ export function calculateUnifiedDiff(
  * Calculate inline diff between two lines
  */
 function calculateInlineDiff(oldLine: string, newLine: string): DiffToken[] {
+    if (oldLine.length > MAX_INLINE_DIFF_LINE_LENGTH || newLine.length > MAX_INLINE_DIFF_LINE_LENGTH) {
+        return [];
+    }
     // Use word-level diff for better readability
     const wordDiff = diffWordsWithSpace(oldLine, newLine);
 
@@ -190,6 +197,10 @@ function calculateSimilarity(str1: string, str2: string): number {
 
     for (let i = 0; i < minLen; i++) {
         if (chars1[i] === chars2[i]) matches++;
+    }
+
+    if (str1.length > MAX_INLINE_DIFF_LINE_LENGTH || str2.length > MAX_INLINE_DIFF_LINE_LENGTH) {
+        return matches / maxLen;
     }
 
     // Also check for common substrings
