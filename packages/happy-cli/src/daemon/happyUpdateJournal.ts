@@ -1,4 +1,4 @@
-import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
     HappyUpdateOperationIdSchema,
@@ -10,7 +10,6 @@ import {
 
 export const HAPPY_UPDATE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RETAINED_OPERATIONS = 100;
-const LOCK_STALE_MS = 10 * 60 * 1000;
 
 export type HappyUpdateJournalOptions = {
     rootDir: string;
@@ -112,7 +111,25 @@ export class HappyUpdateJournal {
         await Promise.all([...toDelete.values()].flatMap((entry) => [
             unlink(entry.path).catch(() => undefined),
             unlink(this.requestPathFor(entry.snapshot.operationId)).catch(() => undefined),
+            rm(join(this.options.rootDir, `work-${entry.snapshot.operationId}`), { recursive: true, force: true }),
         ]));
+    }
+
+    async isLockActive(): Promise<boolean> {
+        try {
+            const value = (await readFile(this.lockPath, 'utf8')).trim();
+            const pid = Number(value);
+            if (!Number.isInteger(pid) || pid <= 0) return false;
+            try {
+                process.kill(pid, 0);
+                return true;
+            } catch (error: any) {
+                return error?.code === 'EPERM';
+            }
+        } catch (error: any) {
+            if (error?.code === 'ENOENT') return false;
+            throw error;
+        }
     }
 
     async acquireLock(): Promise<() => Promise<void>> {
@@ -123,14 +140,9 @@ export class HappyUpdateJournal {
             await handle.close();
         } catch (error: any) {
             if (error?.code === 'EEXIST') {
-                try {
-                    const lock = await stat(this.lockPath);
-                    if (this.now() - lock.mtimeMs > LOCK_STALE_MS) {
-                        await unlink(this.lockPath);
-                        return this.acquireLock();
-                    }
-                } catch { /* race with the lock owner */ }
-                throw new Error('A Happy update is already in progress');
+                if (await this.isLockActive()) throw new Error('A Happy update is already in progress');
+                await unlink(this.lockPath).catch(() => undefined);
+                return this.acquireLock();
             }
             throw error;
         }

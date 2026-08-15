@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { View, Text, ScrollView, ActivityIndicator, RefreshControl, Platform, Pressable, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Item } from '@/components/Item';
@@ -24,7 +24,8 @@ import type { CodexDeviceGroup } from '@slopus/happy-wire';
 import { assignMachineToCodexDeviceGroup, removeCodexDeviceGroup, resolveCodexPolicyAssignment, upsertCodexDeviceGroup } from '@/sync/codexDeviceGroups';
 import { CodexPolicyEditor } from '@/components/CodexPolicyEditor';
 import { fetchLatestHappyCliRelease, isHappySelfUpdateSupported } from '@/sync/happyUpdate';
-import { runHappyUpdateBatch, summarizeHappyUpdateBatch, type HappyUpdateBatchResult } from '@/sync/happyUpdateBatch';
+import { classifyHappyUpdateRetry, runHappyUpdateBatch, summarizeHappyUpdateBatch, type HappyUpdateBatchResult } from '@/sync/happyUpdateBatch';
+import { loadHappyDeviceUpdate, loadHappyGroupUpdate, saveHappyDeviceUpdate, saveHappyGroupUpdate } from '@/sync/happyUpdatePersistence';
 
 const styles = StyleSheet.create((theme) => ({
     pathInputContainer: {
@@ -89,7 +90,8 @@ export default function MachineDetailScreen() {
     const [codexOperation, setCodexOperation] = useState<CodexOperationSnapshot | null>(null);
     const [isCodexBusy, setIsCodexBusy] = useState(false);
     const [isApplyingCodexGroup, setIsApplyingCodexGroup] = useState(false);
-    const [happyUpdateOperation, setHappyUpdateOperation] = useState<HappyUpdateOperationSnapshot | null>(null);
+    const [happyUpdateOperation, setHappyUpdateOperation] = useState<HappyUpdateOperationSnapshot | null>(() => machineId ? loadHappyDeviceUpdate(machineId)?.snapshot ?? null : null);
+    const [happyVerificationPending, setHappyVerificationPending] = useState(() => machineId ? loadHappyDeviceUpdate(machineId)?.verificationPending === true : false);
     const [isHappyUpdateBusy, setIsHappyUpdateBusy] = useState(false);
     const [happyBatchResults, setHappyBatchResults] = useState<HappyUpdateBatchResult[]>([]);
     const [isHappyBatchBusy, setIsHappyBatchBusy] = useState(false);
@@ -114,9 +116,33 @@ export default function MachineDetailScreen() {
     const assignedCodexGroup = useMemo(() => (
         settings.codexDeviceGroups.find((group) => group.machineIds.includes(machineId!)) ?? null
     ), [machineId, settings.codexDeviceGroups]);
+
+    useEffect(() => {
+        if (!machineId) return;
+        const persisted = loadHappyDeviceUpdate(machineId);
+        setHappyUpdateOperation(persisted?.snapshot ?? null);
+        setHappyVerificationPending(persisted?.verificationPending === true);
+    }, [machineId]);
+
+    useEffect(() => {
+        const persisted = assignedCodexGroup ? loadHappyGroupUpdate(assignedCodexGroup.id) : null;
+        setHappyBatchResults(persisted?.results ?? []);
+    }, [assignedCodexGroup?.id]);
+
+    const updateHappyOperation = useCallback((snapshot: HappyUpdateOperationSnapshot | null, verificationPending = false) => {
+        setHappyUpdateOperation(snapshot);
+        setHappyVerificationPending(verificationPending);
+        if (machineId && snapshot) saveHappyDeviceUpdate(machineId, snapshot, verificationPending);
+    }, [machineId]);
+
+    const updateHappyBatchResults = useCallback((results: HappyUpdateBatchResult[]) => {
+        setHappyBatchResults(results);
+        if (assignedCodexGroup) saveHappyGroupUpdate(assignedCodexGroup.id, results);
+    }, [assignedCodexGroup]);
     const hasPendingCodexOperation = codexOperation?.state === 'queued' || codexOperation?.state === 'running';
     const hasPendingHappyUpdate = happyUpdateOperation !== null
         && !['completed', 'failed', 'recovered'].includes(happyUpdateOperation.phase);
+    const hasHappyContinuation = hasPendingHappyUpdate || happyVerificationPending;
 
     const recentPaths = useMemo(() => {
         const paths = new Set<string>();
@@ -254,7 +280,7 @@ export default function MachineDetailScreen() {
                 const next = await machineHappyUpdateStatus(targetMachineId, snapshot.operationId);
                 if (next) {
                     snapshot = next;
-                    setHappyUpdateOperation(next);
+                    updateHappyOperation(next);
                 }
             } catch {
                 // A disconnect is expected while the updater replaces the daemon.
@@ -265,8 +291,19 @@ export default function MachineDetailScreen() {
         return snapshot;
     };
 
+    const waitForMachineVersion = async (targetMachineId: string, targetVersion: string): Promise<boolean> => {
+        for (let attempt = 0; attempt < 20; attempt++) {
+            await sync.refreshMachines().catch(() => undefined);
+            const candidate = storage.getState().machines[targetMachineId];
+            const installedVersion = candidate?.metadata?.happyCliVersion || candidate?.daemonState?.startedWithCliVersion;
+            if (candidate && isMachineOnline(candidate) && installedVersion === targetVersion) return true;
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+        return false;
+    };
+
     const runHappyUpdate = async () => {
-        if (!machine || !machineId || isHappyUpdateBusy || hasPendingHappyUpdate || !isMachineOnline(machine)) return;
+        if (!machine || !machineId || isHappyUpdateBusy || hasHappyContinuation || !isMachineOnline(machine)) return;
         const installedVersion = machine.metadata?.happyCliVersion || machine.daemonState?.startedWithCliVersion;
         if (!isHappySelfUpdateSupported(installedVersion)) {
             Modal.alert(
@@ -295,10 +332,17 @@ export default function MachineDetailScreen() {
                 assetUrl: release.assetUrl,
                 sha256: release.sha256,
             });
-            setHappyUpdateOperation(started);
+            updateHappyOperation(started);
             const result = await pollHappyUpdate(machineId, started);
             if (result.phase === 'completed') {
-                Modal.alert('Happy CLI updated', `Device restarted with Happy CLI ${result.installedVersion || release.version}.`);
+                const verified = await waitForMachineVersion(machineId, result.installedVersion || release.version);
+                updateHappyOperation(result, !verified);
+                Modal.alert(
+                    verified ? 'Happy CLI updated' : 'Happy CLI update awaiting reconnect',
+                    verified
+                        ? `Device restarted with Happy CLI ${result.installedVersion || release.version}.`
+                        : 'The daemon completed the update, but device metadata has not reconnected with the target version yet. Continue monitoring from this page.',
+                );
             } else if (result.phase === 'recovered') {
                 Modal.alert('Update rolled back', result.error || 'The previous Happy CLI version was restored.');
             } else if (result.phase === 'failed') {
@@ -314,14 +358,131 @@ export default function MachineDetailScreen() {
     };
 
     const continueHappyUpdate = async () => {
-        if (!machineId || !happyUpdateOperation || !hasPendingHappyUpdate || isHappyUpdateBusy) return;
+        if (!machineId || !happyUpdateOperation || isHappyUpdateBusy) return;
         setIsHappyUpdateBusy(true);
         try {
-            await pollHappyUpdate(machineId, happyUpdateOperation);
+            if (happyVerificationPending && happyUpdateOperation.phase === 'completed') {
+                const verified = await waitForMachineVersion(machineId, happyUpdateOperation.installedVersion || happyUpdateOperation.targetVersion);
+                updateHappyOperation(happyUpdateOperation, !verified);
+            } else if (hasPendingHappyUpdate) {
+                await pollHappyUpdate(machineId, happyUpdateOperation);
+            }
         } finally {
             setIsHappyUpdateBusy(false);
         }
     };
+
+    useEffect(() => {
+        if (!happyUpdateOperation || !hasHappyContinuation || !machine || !isMachineOnline(machine)) return;
+        void continueHappyUpdate();
+    }, [machineId, happyUpdateOperation?.operationId]);
+
+    const monitorHappyBatchTarget = async (
+        target: { machineId: string; targetVersion: string },
+        initial: HappyUpdateOperationSnapshot,
+        report?: (snapshot: HappyUpdateOperationSnapshot) => void,
+    ): Promise<HappyUpdateOperationSnapshot> => {
+        let snapshot = initial;
+        for (let attempt = 0; attempt < 400 && !['completed', 'failed', 'recovered'].includes(snapshot.phase); attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            try {
+                const next = await machineHappyUpdateStatus(target.machineId, snapshot.operationId);
+                if (next) {
+                    snapshot = next;
+                    report?.(next);
+                }
+            } catch {
+                // The target daemon is expected to disconnect during replacement.
+            }
+        }
+        if (snapshot.phase === 'completed') {
+            const verified = await waitForMachineVersion(target.machineId, snapshot.installedVersion || target.targetVersion);
+            if (!verified) {
+                return {
+                    ...snapshot,
+                    phase: 'starting-daemon' as const,
+                    progress: 99,
+                    message: 'Waiting for device metadata to confirm the updated daemon',
+                };
+            }
+        }
+        return snapshot;
+    };
+
+    const executeHappyBatchTarget = async (
+        target: { machineId: string; targetVersion: string },
+        release: { version: string; assetUrl: string; sha256: string },
+        report?: (snapshot: HappyUpdateOperationSnapshot) => void,
+        operationId = sync.encryption.generateId(),
+    ) => {
+        const started = await machineHappyUpdateStart(target.machineId, {
+            operationId,
+            targetVersion: release.version,
+            assetUrl: release.assetUrl,
+            sha256: release.sha256,
+        });
+        report?.(started);
+        return monitorHappyBatchTarget(target, started, report);
+    };
+
+    const retryHappyBatchResult = async (result: HappyUpdateBatchResult) => {
+        if (isHappyBatchBusy || !assignedCodexGroup) return;
+        const mode = classifyHappyUpdateRetry(result);
+        if (mode === 'none') return;
+        setIsHappyBatchBusy(true);
+        try {
+            const machineTarget = allMachines.find((candidate) => candidate.id === result.target.machineId);
+            if (!machineTarget || !isMachineOnline(machineTarget)) {
+                Modal.alert('Device is offline', 'Reconnect the device before retrying this update.');
+                return;
+            }
+            const release = await fetchLatestHappyCliRelease('0.0.0');
+            if (!release) return;
+            const target = { ...result.target, online: true, installedVersion: machineTarget.metadata?.happyCliVersion || machineTarget.daemonState?.startedWithCliVersion, targetVersion: release.version };
+            let nextResult: HappyUpdateBatchResult;
+            if (mode === 'continue' && result.snapshot) {
+                const snapshot = await monitorHappyBatchTarget(target, result.snapshot, (next) => {
+                    nextResult = { target, status: 'updating', snapshot: next };
+                    updateHappyBatchResults([...happyBatchResults.filter((item) => item.target.machineId !== target.machineId), nextResult]);
+                });
+                nextResult = { target, status: snapshot.phase === 'completed' ? 'updated' : snapshot.phase === 'recovered' ? 'recovered' : snapshot.phase === 'failed' ? 'failed' : 'timed-out', snapshot, error: snapshot.error };
+            } else {
+                const snapshot = await executeHappyBatchTarget(target, release);
+                nextResult = { target, status: snapshot.phase === 'completed' ? 'updated' : snapshot.phase === 'recovered' ? 'recovered' : snapshot.phase === 'failed' ? 'failed' : 'timed-out', snapshot, error: snapshot.error };
+            }
+            updateHappyBatchResults([...happyBatchResults.filter((item) => item.target.machineId !== target.machineId), nextResult]);
+        } finally {
+            setIsHappyBatchBusy(false);
+        }
+    };
+
+    const resumeHappyGroupUpdates = async () => {
+        if (!assignedCodexGroup || isHappyBatchBusy) return;
+        const pending = happyBatchResults.filter((result) => (result.status === 'updating' || result.status === 'timed-out') && result.snapshot);
+        if (pending.length === 0) return;
+        setIsHappyBatchBusy(true);
+        let latest = [...happyBatchResults];
+        try {
+            await Promise.all(pending.map(async (result) => {
+                const machineTarget = allMachines.find((candidate) => candidate.id === result.target.machineId);
+                if (!machineTarget) return;
+                const target = { ...result.target, online: isMachineOnline(machineTarget), installedVersion: machineTarget.metadata?.happyCliVersion || machineTarget.daemonState?.startedWithCliVersion };
+                const snapshot = await monitorHappyBatchTarget(target, result.snapshot!, (next) => {
+                    latest = latest.map((item) => item.target.machineId === target.machineId ? { ...item, status: 'updating', snapshot: next } : item);
+                    updateHappyBatchResults(latest);
+                });
+                const status = snapshot.phase === 'completed' ? 'updated' : snapshot.phase === 'recovered' ? 'recovered' : snapshot.phase === 'failed' ? 'failed' : 'timed-out';
+                latest = latest.map((item) => item.target.machineId === target.machineId ? { ...item, status, snapshot, error: snapshot.error } : item);
+                updateHappyBatchResults(latest);
+            }));
+        } finally {
+            setIsHappyBatchBusy(false);
+        }
+    };
+
+    useEffect(() => {
+        void resumeHappyGroupUpdates();
+    }, [assignedCodexGroup?.id, happyBatchResults.length]);
 
     const runHappyGroupUpdate = async () => {
         if (!assignedCodexGroup || isHappyBatchBusy) return;
@@ -333,7 +494,7 @@ export default function MachineDetailScreen() {
             return;
         }
         setIsHappyBatchBusy(true);
-        setHappyBatchResults([]);
+        updateHappyBatchResults([]);
         try {
             const release = await fetchLatestHappyCliRelease('0.0.0');
             if (!release) {
@@ -355,39 +516,21 @@ export default function MachineDetailScreen() {
                 targetVersion: release.version,
             }));
             const results = await runHappyUpdateBatch(targets, async (target, report) => {
-                const started = await machineHappyUpdateStart(target.machineId, {
-                    operationId: sync.encryption.generateId(),
-                    targetVersion: release.version,
-                    assetUrl: release.assetUrl,
-                    sha256: release.sha256,
-                });
-                report?.(started);
-                let snapshot = started;
-                for (let attempt = 0; attempt < 400 && !['completed', 'failed', 'recovered'].includes(snapshot.phase); attempt++) {
-                    await new Promise((resolve) => setTimeout(resolve, 1500));
-                    try {
-                        const next = await machineHappyUpdateStatus(target.machineId, snapshot.operationId);
-                        if (next) {
-                            snapshot = next;
-                            report?.(next);
-                        }
-                    } catch {
-                        // The target daemon is expected to disconnect during replacement.
-                    }
-                }
-                return snapshot;
+                return executeHappyBatchTarget(target, release, report);
             }, {
                 concurrency: 3,
                 onResult: (result) => setHappyBatchResults((previous) => {
                     const next = previous.filter((item) => item.target.machineId !== result.target.machineId);
-                    return [...next, result];
+                    const merged = [...next, result];
+                    if (assignedCodexGroup) saveHappyGroupUpdate(assignedCodexGroup.id, merged);
+                    return merged;
                 }),
             });
-            setHappyBatchResults(results);
+            updateHappyBatchResults(results);
             const summary = summarizeHappyUpdateBatch(results);
             Modal.alert(
                 'Happy group update finished',
-                `${summary.updated} updated, ${summary.alreadyCurrent} already current, ${summary.offline} offline, ${summary.bootstrapRequired} need bootstrap, ${summary.recovered} rolled back, ${summary.failed} failed.`,
+                `${summary.updated} updated, ${summary.alreadyCurrent} already current, ${summary.offline} offline, ${summary.bootstrapRequired} need bootstrap, ${summary.recovered} rolled back, ${summary.failed} failed, ${summary.timedOut} awaiting reconnect.`,
             );
         } catch (error) {
             Modal.alert(t('common.error'), error instanceof Error ? error.message : 'Group update could not be started.');
@@ -865,14 +1008,16 @@ export default function MachineDetailScreen() {
                         showChevron={false}
                     />
                     <Item
-                        title={happySelfUpdateSupported ? 'Update Happy & restart daemon' : 'One-time bootstrap required'}
+                        title={happyVerificationPending
+                            ? 'Verify Happy update reconnect'
+                            : happySelfUpdateSupported ? 'Update Happy & restart daemon' : 'One-time bootstrap required'}
                         subtitle={happyUpdateOperation
                             ? `${happyUpdateOperation.phase} (${happyUpdateOperation.progress}%)`
                             : happySelfUpdateSupported
                                 ? 'Checks the verified Gs-ygc/happy CLI release'
                                 : 'Install Happy CLI 1.2.5 or newer once through SSH'}
-                        onPress={() => void runHappyUpdate()}
-                        disabled={isHappyUpdateBusy || hasPendingHappyUpdate || !isMachineOnline(machine)}
+                        onPress={() => void (hasHappyContinuation ? continueHappyUpdate() : runHappyUpdate())}
+                        disabled={isHappyUpdateBusy || !isMachineOnline(machine)}
                         rightElement={isHappyUpdateBusy
                             ? <ActivityIndicator size="small" />
                             : <Ionicons
@@ -881,9 +1026,9 @@ export default function MachineDetailScreen() {
                                 color={theme.colors.textSecondary}
                             />}
                     />
-                    {hasPendingHappyUpdate && !isHappyUpdateBusy && (
+                    {hasHappyContinuation && !isHappyUpdateBusy && (
                         <Item
-                            title="Continue monitoring Happy update"
+                            title={happyVerificationPending ? 'Continue verifying Happy update' : 'Continue monitoring Happy update'}
                             subtitle={`${happyUpdateOperation!.phase} (${happyUpdateOperation!.progress}%)`}
                             onPress={() => void continueHappyUpdate()}
                             rightElement={<Ionicons name="pulse-outline" size={20} color={theme.colors.textSecondary} />}
@@ -1031,10 +1176,12 @@ export default function MachineDetailScreen() {
                                             ? `${result.status} · ${result.snapshot.phase} (${result.snapshot.progress}%)`
                                             : result.status}
                                         subtitleLines={0}
-                                        showChevron={false}
+                                        showChevron={classifyHappyUpdateRetry(result) !== 'none'}
+                                        onPress={() => void retryHappyBatchResult(result)}
+                                        disabled={isHappyBatchBusy}
                                         rightElement={result.status === 'updated'
                                             ? <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} />
-                                            : result.status === 'failed' || result.status === 'recovered'
+                                            : result.status === 'failed' || result.status === 'recovered' || result.status === 'timed-out'
                                                 ? <Ionicons name="warning-outline" size={20} color={theme.colors.warning} />
                                                 : undefined}
                                     />

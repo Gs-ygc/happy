@@ -12,6 +12,12 @@ const validRequest = {
     sha256: 'a'.repeat(64),
 };
 
+const requestForVersion = (targetVersion: string) => ({
+    ...validRequest,
+    targetVersion,
+    assetUrl: `https://github.com/Gs-ygc/happy/releases/download/cli-${targetVersion}/happy-${targetVersion}.tgz`,
+});
+
 describe('Happy update wire contract', () => {
     it('accepts an exact verified CLI release request', () => {
         expect(HappyUpdateRequestSchema.parse(validRequest)).toEqual(validRequest);
@@ -19,6 +25,9 @@ describe('Happy update wire contract', () => {
 
     it('rejects non-semver targets, non-GitHub assets, and invalid digests', () => {
         expect(() => HappyUpdateRequestSchema.parse({ ...validRequest, targetVersion: 'latest' })).toThrow();
+        expect(() => HappyUpdateRequestSchema.parse(requestForVersion('01.2.3'))).toThrow();
+        expect(() => HappyUpdateRequestSchema.parse(requestForVersion('1.2.3-..'))).toThrow();
+        expect(() => HappyUpdateRequestSchema.parse(requestForVersion('1.2.3-01'))).toThrow();
         expect(() => HappyUpdateRequestSchema.parse({ ...validRequest, assetUrl: 'https://evil.example/happy.tgz' })).toThrow();
         expect(() => HappyUpdateRequestSchema.parse({ ...validRequest, sha256: 'A'.repeat(64) })).toThrow();
         expect(() => HappyUpdateRequestSchema.parse({ ...validRequest, sha256: 'a'.repeat(63) })).toThrow();

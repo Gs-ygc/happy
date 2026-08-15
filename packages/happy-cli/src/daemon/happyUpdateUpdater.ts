@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -29,16 +29,74 @@ export function validateHappyPackageManifest(manifest: unknown, targetVersion: s
     if (value.version !== targetVersion) throw new Error('Happy update package version does not match target');
 }
 
-export function buildHappyNpmInstallCommand(tarballPath: string): { command: string; args: string[] } {
-    return { command: 'npm', args: ['install', '--global', tarballPath] };
+export function buildHappyNpmInstallCommand(npmExecutable: string, tarballPath: string): { command: string; args: string[] } {
+    return { command: npmExecutable, args: ['install', '--global', tarballPath] };
 }
 
 export function sanitizeHappyUpdateError(error: unknown): string {
     const raw = error instanceof Error ? error.message : String(error);
     return raw
         .replace(/((?:token|password|secret|api[_-]?key|authorization)\s*[=:]\s*)[^\s]+/gi, '$1[redacted]')
+        .replace(/\b[A-Z_][A-Z0-9_]*=[^\s]+/g, (value) => `${value.slice(0, value.indexOf('=') + 1)}[redacted]`)
+        .replace(/https?:\/\/[^\s;]+/gi, '[url]')
+        .replace(/(?:[A-Za-z]:\\|\/)[^\s;]+/g, '[path]')
         .replace(/\r?\n/g, ' ')
         .slice(0, 500) || 'Happy update failed';
+}
+
+export type HappyNpmInstallation = {
+    npmExecutable: string;
+    packageRoot: string;
+};
+
+export type HappyNpmDetectionDependencies = {
+    resolveNpmExecutable: () => Promise<string>;
+    readGlobalRoot: (npmExecutable: string) => Promise<string>;
+    realpath: (path: string) => Promise<string>;
+};
+
+async function defaultResolveNpmExecutable(): Promise<string> {
+    try {
+        const lookup = process.platform === 'win32' ? 'where.exe' : 'which';
+        const result = await execFileAsync(lookup, ['npm'], { windowsHide: true, maxBuffer: 64 * 1024 });
+        const executable = result.stdout.trim().split(/\r?\n/)[0];
+        if (!executable || !isAbsolute(executable)) throw new Error('invalid npm executable');
+        return executable;
+    } catch {
+        throw new Error('Happy CLI is not managed by a supported npm installation');
+    }
+}
+
+async function defaultReadGlobalRoot(npmExecutable: string): Promise<string> {
+    try {
+        const result = await execFileAsync(npmExecutable, ['root', '--global'], {
+            windowsHide: true,
+            maxBuffer: 64 * 1024,
+        });
+        return result.stdout.trim();
+    } catch {
+        throw new Error('Happy CLI is not managed by a supported npm installation');
+    }
+}
+
+export async function detectHappyNpmInstallation(
+    packageRoot: string,
+    dependencies: HappyNpmDetectionDependencies = {
+        resolveNpmExecutable: defaultResolveNpmExecutable,
+        readGlobalRoot: defaultReadGlobalRoot,
+        realpath,
+    },
+): Promise<HappyNpmInstallation> {
+    const npmExecutable = await dependencies.resolveNpmExecutable();
+    const globalRoot = await dependencies.readGlobalRoot(npmExecutable);
+    const [actualPackageRoot, expectedPackageRoot] = await Promise.all([
+        dependencies.realpath(packageRoot),
+        dependencies.realpath(join(globalRoot, 'happy')).catch(() => ''),
+    ]);
+    if (!expectedPackageRoot || actualPackageRoot !== expectedPackageRoot) {
+        throw new Error('Happy CLI is not managed by the active npm installation');
+    }
+    return { npmExecutable, packageRoot: actualPackageRoot };
 }
 
 export async function downloadHappyUpdateAsset(
@@ -149,7 +207,7 @@ export async function runHappyUpdateWorker(
     const tarballPath = join(dependencies.workDir, `happy-${request.targetVersion}.tgz`);
     let backupPath: string | null = null;
     let installAttempted = false;
-    const releaseLock = await dependencies.journal.acquireLock();
+    let releaseLock: (() => Promise<void>) | null = null;
 
     const record = async (
         phase: HappyUpdatePhase,
@@ -164,10 +222,14 @@ export async function runHappyUpdateWorker(
             ...patch,
         };
         await dependencies.journal.write(snapshot);
+        if (phase === 'completed' || phase === 'recovered') {
+            await rm(dependencies.workDir, { recursive: true, force: true });
+        }
         return snapshot;
     };
 
     try {
+        releaseLock = await dependencies.journal.acquireLock();
         await mkdir(dependencies.workDir, { recursive: true });
         backupPath = await dependencies.backupCurrent(dependencies.workDir);
         await record('downloading', { message: 'Downloading Happy CLI' });
@@ -213,21 +275,25 @@ export async function runHappyUpdateWorker(
         }
         return await record('failed', { message: 'Happy update failed before installation', error: sanitized });
     } finally {
-        await releaseLock();
+        await releaseLock?.();
     }
 }
 
-export function spawnHappyUpdateWorker(
+export async function spawnHappyUpdateWorker(
     payload: HappyUpdateWorkerPayload,
     entrypoint = process.argv[1],
     spawnImpl: typeof spawn = spawn,
-): ChildProcess {
+): Promise<ChildProcess> {
     if (!entrypoint) throw new Error('Happy update worker entrypoint is unavailable');
     const encodedPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
     const child = spawnImpl(process.execPath, [entrypoint, 'daemon', 'happy-update-worker', encodedPayload], {
         detached: true,
         stdio: 'ignore',
         env: process.env,
+    });
+    await new Promise<void>((resolve, reject) => {
+        child.once('spawn', resolve);
+        child.once('error', () => reject(new Error('Happy update worker could not start')));
     });
     child.unref();
     return child;
@@ -246,22 +312,25 @@ async function readHappyPackageManifestFromTarball(tarballPath: string, workDir:
     return JSON.parse(await readFile(join(manifestRoot, 'package', 'package.json'), 'utf8'));
 }
 
-async function runNpm(args: string[], timeout = 15 * 60 * 1000): Promise<string> {
+async function runNpm(npmExecutable: string, args: string[], publicError: string, timeout = 15 * 60 * 1000): Promise<string> {
     try {
-        const result = await execFileAsync('npm', args, {
+        const result = await execFileAsync(npmExecutable, args, {
             timeout,
             windowsHide: true,
             maxBuffer: 1024 * 1024,
         });
         return result.stdout;
     } catch (error: any) {
-        const detail = `${error?.stderr ?? ''}\n${error?.stdout ?? ''}`.trim().split(/\r?\n/).slice(-1)[0];
-        throw new Error(`npm operation failed: ${detail || error?.message || 'unknown error'}`);
+        throw new Error(publicError);
     }
 }
 
-async function backupCurrentHappy(workDir: string): Promise<string> {
-    const output = await runNpm(['pack', projectPath(), '--pack-destination', workDir, '--ignore-scripts', '--json']);
+async function backupCurrentHappy(workDir: string, installation: HappyNpmInstallation): Promise<string> {
+    const output = await runNpm(
+        installation.npmExecutable,
+        ['pack', installation.packageRoot, '--pack-destination', workDir, '--ignore-scripts', '--json'],
+        'Could not back up the current Happy CLI installation',
+    );
     const parsed = JSON.parse(output) as Array<{ filename?: string }>;
     const filename = parsed[0]?.filename;
     if (!filename) {
@@ -315,6 +384,8 @@ export async function runEncodedHappyUpdateWorker(encoded: string): Promise<Happ
     const workDir = join(configuration.happyUpdatesDir, `work-${payload.request.operationId}`);
     const entrypoint = process.argv[1];
     if (!entrypoint) throw new Error('Happy CLI entrypoint is unavailable');
+    let installationPromise: Promise<HappyNpmInstallation> | null = null;
+    const getInstallation = () => installationPromise ??= detectHappyNpmInstallation(projectPath());
     return runHappyUpdateWorker(payload, {
         journal,
         workDir,
@@ -322,10 +393,11 @@ export async function runEncodedHappyUpdateWorker(encoded: string): Promise<Happ
         download: (assetUrl, destination) => downloadHappyUpdateAsset(assetUrl, destination),
         hash: hashFileSha256,
         readManifest: (tarballPath) => readHappyPackageManifestFromTarball(tarballPath, workDir),
-        backupCurrent: backupCurrentHappy,
+        backupCurrent: async (targetWorkDir) => backupCurrentHappy(targetWorkDir, await getInstallation()),
         installTarball: async (tarballPath) => {
-            const command = buildHappyNpmInstallCommand(tarballPath);
-            await runNpm(command.args);
+            const installation = await getInstallation();
+            const command = buildHappyNpmInstallCommand(installation.npmExecutable, tarballPath);
+            await runNpm(command.command, command.args, 'Happy CLI installation failed');
         },
         stopDaemon: stopRunningDaemon,
         startDaemon: () => startInstalledDaemon(entrypoint),

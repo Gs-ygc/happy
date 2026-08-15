@@ -901,14 +901,15 @@ export async function startDaemon(): Promise<void> {
     });
     const happyUpdateManager = new HappyUpdateManager({
       journal: happyUpdateJournal,
-      launchWorker: (request) => {
-        spawnHappyUpdateWorker({
+      launchWorker: async (request) => {
+        await spawnHappyUpdateWorker({
           request,
           daemonPid: process.pid,
           daemonPort: controlPort,
         });
       },
     });
+    await happyUpdateManager.reconcileInterruptedOperations();
 
     // Write initial daemon state (no lock needed for state file)
     const fileState: DaemonLocallyPersistedState = {

@@ -40,6 +40,20 @@ export class HappyUpdateManager {
         return this.options.journal.read(operationId);
     }
 
+    async reconcileInterruptedOperations(): Promise<void> {
+        const active = (await this.options.journal.listRecent())
+            .filter((snapshot) => !TERMINAL_PHASES.has(snapshot.phase));
+        if (active.length === 0 || await this.options.journal.isLockActive()) return;
+        await Promise.all(active.map((snapshot) => this.options.journal.write({
+            ...snapshot,
+            phase: 'failed',
+            progress: 100,
+            updatedAt: this.now(),
+            message: 'Happy update worker stopped',
+            error: 'Happy update worker stopped before completion',
+        })));
+    }
+
     private async startInternal(input: HappyUpdateRequest): Promise<HappyUpdateOperationSnapshot> {
         const request = HappyUpdateRequestSchema.parse(input);
         const existing = await this.options.journal.read(request.operationId);

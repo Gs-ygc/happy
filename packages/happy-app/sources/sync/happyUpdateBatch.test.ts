@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runHappyUpdateBatch, summarizeHappyUpdateBatch, type HappyUpdateBatchTarget } from './happyUpdateBatch';
+import { classifyHappyUpdateRetry, runHappyUpdateBatch, summarizeHappyUpdateBatch, type HappyUpdateBatchTarget } from './happyUpdateBatch';
 
 const target = (id: string, overrides: Partial<HappyUpdateBatchTarget> = {}): HappyUpdateBatchTarget => ({
     machineId: id,
@@ -68,6 +68,31 @@ describe('Happy update batch coordinator', () => {
             bootstrapRequired: 0,
             recovered: 1,
             failed: 1,
+            timedOut: 0,
         });
+    });
+
+    it('preserves a nonterminal operation as timed out instead of failed', async () => {
+        const results = await runHappyUpdateBatch([target('slow')], async (item) => ({
+            operationId: `op-${item.machineId}`,
+            targetVersion: item.targetVersion,
+            phase: 'starting-daemon' as const,
+            progress: 85,
+            updatedAt: 1,
+        }));
+
+        expect(results[0]).toMatchObject({
+            status: 'timed-out',
+            snapshot: { operationId: 'op-slow', phase: 'starting-daemon' },
+        });
+        expect(classifyHappyUpdateRetry(results[0])).toBe('continue');
+    });
+
+    it('creates new operations only for retryable terminal or newly-online results', () => {
+        expect(classifyHappyUpdateRetry({ target: target('failed'), status: 'failed' })).toBe('restart');
+        expect(classifyHappyUpdateRetry({ target: target('recovered'), status: 'recovered' })).toBe('restart');
+        expect(classifyHappyUpdateRetry({ target: target('offline'), status: 'offline' })).toBe('restart');
+        expect(classifyHappyUpdateRetry({ target: target('current'), status: 'already-current' })).toBe('none');
+        expect(classifyHappyUpdateRetry({ target: target('bootstrap'), status: 'bootstrap-required' })).toBe('none');
     });
 });

@@ -56,4 +56,46 @@ describe('HappyUpdateManager', () => {
 
         await expect(reconstructed.get(started.operationId)).resolves.toEqual(started);
     });
+
+    it('marks an interrupted nonterminal operation failed during daemon reconstruction', async () => {
+        const rootDir = await mkdtemp(join(tmpdir(), 'happy-update-interrupted-'));
+        tempDirs.push(rootDir);
+        const journal = new HappyUpdateJournal({ rootDir });
+        await journal.write({
+            operationId: 'interrupted-1',
+            targetVersion: '1.2.5',
+            phase: 'installing',
+            progress: 55,
+            updatedAt: 100,
+        });
+        const reconstructed = new HappyUpdateManager({ journal, launchWorker: vi.fn(), now: () => 200 });
+
+        await reconstructed.reconcileInterruptedOperations();
+
+        await expect(journal.read('interrupted-1')).resolves.toMatchObject({
+            phase: 'failed',
+            progress: 100,
+            error: 'Happy update worker stopped before completion',
+        });
+    });
+
+    it('preserves a nonterminal operation while its worker lock is active', async () => {
+        const rootDir = await mkdtemp(join(tmpdir(), 'happy-update-active-'));
+        tempDirs.push(rootDir);
+        const journal = new HappyUpdateJournal({ rootDir });
+        await journal.write({
+            operationId: 'active-1',
+            targetVersion: '1.2.5',
+            phase: 'installing',
+            progress: 55,
+            updatedAt: 100,
+        });
+        const release = await journal.acquireLock();
+        const reconstructed = new HappyUpdateManager({ journal, launchWorker: vi.fn(), now: () => 200 });
+
+        await reconstructed.reconcileInterruptedOperations();
+
+        await expect(journal.read('active-1')).resolves.toMatchObject({ phase: 'installing' });
+        await release();
+    });
 });

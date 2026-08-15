@@ -10,7 +10,7 @@ export type HappyUpdateBatchTarget = {
     targetVersion: string;
 };
 
-export type HappyUpdateBatchStatus = 'pending' | 'updating' | 'updated' | 'already-current' | 'offline' | 'bootstrap-required' | 'recovered' | 'failed';
+export type HappyUpdateBatchStatus = 'pending' | 'updating' | 'updated' | 'already-current' | 'offline' | 'bootstrap-required' | 'recovered' | 'failed' | 'timed-out';
 
 export type HappyUpdateBatchResult = {
     target: HappyUpdateBatchTarget;
@@ -64,7 +64,9 @@ export async function runHappyUpdateBatch(
                     ? 'updated'
                     : snapshot.phase === 'recovered'
                         ? 'recovered'
-                        : 'failed';
+                        : snapshot.phase === 'failed'
+                            ? 'failed'
+                            : 'timed-out';
                 results[current.index] = {
                     ...results[current.index],
                     status,
@@ -95,5 +97,12 @@ export function summarizeHappyUpdateBatch(results: HappyUpdateBatchResult[]) {
         bootstrapRequired: results.filter((result) => result.status === 'bootstrap-required').length,
         recovered: results.filter((result) => result.status === 'recovered').length,
         failed: results.filter((result) => result.status === 'failed').length,
+        timedOut: results.filter((result) => result.status === 'timed-out').length,
     };
+}
+
+export function classifyHappyUpdateRetry(result: HappyUpdateBatchResult): 'continue' | 'restart' | 'none' {
+    if (result.status === 'timed-out' && result.snapshot) return 'continue';
+    if (result.status === 'failed' || result.status === 'recovered' || result.status === 'offline') return 'restart';
+    return 'none';
 }

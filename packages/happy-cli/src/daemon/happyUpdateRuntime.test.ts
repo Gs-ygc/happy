@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     HappyUpdateJournal,
@@ -8,12 +9,14 @@ import {
 } from './happyUpdateJournal';
 import {
     buildHappyNpmInstallCommand,
+    detectHappyNpmInstallation,
     downloadHappyUpdateAsset,
     decodeHappyUpdateWorkerPayload,
     hashFileSha256,
     sanitizeHappyUpdateError,
     validateHappyPackageManifest,
     runHappyUpdateWorker,
+    spawnHappyUpdateWorker,
 } from './happyUpdateUpdater';
 
 const snapshots = [
@@ -90,11 +93,30 @@ describe('Happy update runtime validation', () => {
     });
 
     it('builds a fixed npm install command and sanitizes secrets from errors', () => {
-        expect(buildHappyNpmInstallCommand('/tmp/happy-1.2.5.tgz')).toEqual({
-            command: 'npm',
+        expect(buildHappyNpmInstallCommand('/opt/npm/bin/npm', '/tmp/happy-1.2.5.tgz')).toEqual({
+            command: '/opt/npm/bin/npm',
             args: ['install', '--global', '/tmp/happy-1.2.5.tgz'],
         });
-        expect(sanitizeHappyUpdateError(new Error('token=secret-value /tmp/private'))).toBe('token=[redacted] /tmp/private');
+        expect(sanitizeHappyUpdateError(new Error('token=secret-value HOME=/home/alice https://private.test/x /tmp/private')))
+            .toBe('token=[redacted] HOME=[redacted] [url] [path]');
+    });
+
+    it('accepts only the Happy package managed by the resolved global npm installation', async () => {
+        const installation = await detectHappyNpmInstallation('/opt/npm/lib/node_modules/happy', {
+            resolveNpmExecutable: async () => '/opt/npm/bin/npm',
+            readGlobalRoot: async () => '/opt/npm/lib/node_modules',
+            realpath: async (value) => value,
+        });
+
+        expect(installation).toEqual({
+            npmExecutable: '/opt/npm/bin/npm',
+            packageRoot: '/opt/npm/lib/node_modules/happy',
+        });
+        await expect(detectHappyNpmInstallation('/home/alice/happy', {
+            resolveNpmExecutable: async () => '/opt/npm/bin/npm',
+            readGlobalRoot: async () => '/opt/npm/lib/node_modules',
+            realpath: async (value) => value,
+        })).rejects.toThrow('not managed by the active npm installation');
     });
 
     it('strictly decodes the detached worker payload', () => {
@@ -105,6 +127,17 @@ describe('Happy update runtime validation', () => {
         })).toString('base64url');
         expect(decodeHappyUpdateWorkerPayload(encoded)).toMatchObject({ daemonPid: 10, daemonPort: 20 });
         expect(() => decodeHappyUpdateWorkerPayload(Buffer.from('{}').toString('base64url'))).toThrow();
+    });
+
+    it('rejects when the detached worker fails to spawn asynchronously', async () => {
+        const child = new EventEmitter();
+        Object.assign(child, { unref: vi.fn() });
+        const spawnImpl = vi.fn(() => child as any);
+        const spawned = spawnHappyUpdateWorker({ request: validWorkerRequest, daemonPid: 10, daemonPort: 20 }, '/tmp/happy.mjs', spawnImpl as any);
+
+        child.emit('error', new Error('spawn denied'));
+
+        await expect(spawned).rejects.toThrow('Happy update worker could not start');
     });
 
     it('downloads within the size limit and verifies the file digest', async () => {
@@ -177,6 +210,34 @@ describe('Happy update runtime validation', () => {
             phase: 'recovered',
             installedVersion: '1.2.4',
         });
+    });
+
+    it('records a terminal failure when the update lock cannot be acquired', async () => {
+        const journal = {
+            acquireLock: vi.fn().mockRejectedValue(new Error('A Happy update is already in progress')),
+            write: vi.fn().mockResolvedValue(undefined),
+        } as any;
+
+        await runHappyUpdateWorker({ request: { ...validWorkerRequest }, daemonPid: 10, daemonPort: 20 }, {
+            journal,
+            workDir: '/tmp/happy-update-lock-failure',
+            currentVersion: '1.2.4',
+            download: vi.fn(),
+            hash: vi.fn(),
+            readManifest: vi.fn(),
+            backupCurrent: vi.fn(),
+            installTarball: vi.fn(),
+            stopDaemon: vi.fn(),
+            startDaemon: vi.fn(),
+            waitForDaemonVersion: vi.fn(),
+            now: () => 700,
+        });
+
+        expect(journal.write).toHaveBeenCalledWith(expect.objectContaining({
+            operationId: validWorkerRequest.operationId,
+            phase: 'failed',
+            error: expect.stringContaining('already in progress'),
+        }));
     });
 });
 
