@@ -5,3 +5,4 @@ export * from './voice';
 export * from './rigMetadata';
 export * from './codexManagement';
 export * from './activity';
+export * from './happyUpdate';
