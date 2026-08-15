@@ -1,6 +1,11 @@
 import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { HappyUpdateOperationSnapshotSchema, type HappyUpdateOperationSnapshot } from '@slopus/happy-wire';
+import {
+    HappyUpdateOperationSnapshotSchema,
+    HappyUpdateRequestSchema,
+    type HappyUpdateOperationSnapshot,
+    type HappyUpdateRequest,
+} from '@slopus/happy-wire';
 
 export const HAPPY_UPDATE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RETAINED_OPERATIONS = 100;
@@ -28,6 +33,10 @@ export class HappyUpdateJournal {
         return join(this.options.rootDir, `${operationId}.json`);
     }
 
+    private requestPathFor(operationId: string): string {
+        return join(this.options.rootDir, `${operationId}.request`);
+    }
+
     async read(operationId: string): Promise<HappyUpdateOperationSnapshot | null> {
         try {
             const raw = await readFile(this.pathFor(operationId), 'utf8');
@@ -42,6 +51,25 @@ export class HappyUpdateJournal {
         const validated = HappyUpdateOperationSnapshotSchema.parse(snapshot);
         await this.ensureRoot();
         const path = this.pathFor(validated.operationId);
+        const temporaryPath = `${path}.${process.pid}.${this.now()}.tmp`;
+        await writeFile(temporaryPath, `${JSON.stringify(validated, null, 2)}\n`, { mode: 0o600 });
+        await rename(temporaryPath, path);
+    }
+
+    async readRequest(operationId: string): Promise<HappyUpdateRequest | null> {
+        try {
+            const raw = await readFile(this.requestPathFor(operationId), 'utf8');
+            return HappyUpdateRequestSchema.parse(JSON.parse(raw));
+        } catch (error: any) {
+            if (error?.code === 'ENOENT') return null;
+            throw error;
+        }
+    }
+
+    async writeRequest(request: HappyUpdateRequest): Promise<void> {
+        const validated = HappyUpdateRequestSchema.parse(request);
+        await this.ensureRoot();
+        const path = this.requestPathFor(validated.operationId);
         const temporaryPath = `${path}.${process.pid}.${this.now()}.tmp`;
         await writeFile(temporaryPath, `${JSON.stringify(validated, null, 2)}\n`, { mode: 0o600 });
         await rename(temporaryPath, path);
@@ -74,10 +102,14 @@ export class HappyUpdateJournal {
             if (snapshot) entries.push({ path: join(this.options.rootDir, name), snapshot });
         }
         entries.sort((a, b) => b.snapshot.updatedAt - a.snapshot.updatedAt);
-        await Promise.all(entries.slice(MAX_RETAINED_OPERATIONS).map((entry) => unlink(entry.path).catch(() => undefined)));
-        await Promise.all(entries
+        const expired = entries.slice(MAX_RETAINED_OPERATIONS);
+        const aged = entries
             .filter((entry) => now - entry.snapshot.updatedAt > HAPPY_UPDATE_RETENTION_MS)
-            .map((entry) => unlink(entry.path).catch(() => undefined)));
+        const toDelete = new Map([...expired, ...aged].map((entry) => [entry.snapshot.operationId, entry]));
+        await Promise.all([...toDelete.values()].flatMap((entry) => [
+            unlink(entry.path).catch(() => undefined),
+            unlink(this.requestPathFor(entry.snapshot.operationId)).catch(() => undefined),
+        ]));
     }
 
     async acquireLock(): Promise<() => Promise<void>> {

@@ -34,6 +34,7 @@ import { extractNoSandboxFlag } from './utils/sandboxFlags'
 import { handleResumeCommand } from '@/resume/handleResumeCommand'
 import { ensureDaemonRunning } from './daemon/ensureDaemonRunning'
 import { handleCodexCommand } from './commands/codexCommand'
+import { runEncodedHappyUpdateWorker } from './daemon/happyUpdateUpdater'
 
 
 (async () => {
@@ -560,6 +561,14 @@ Conversation history is preserved on the server, but in-flight tool calls are in
     } else if (daemonSubcommand === 'start-sync') {
       await startDaemon()
       process.exit(0)
+    } else if (daemonSubcommand === 'happy-update-worker') {
+      const encodedPayload = args[2]
+      if (!encodedPayload) {
+        console.error('Happy update worker payload is required')
+        process.exit(1)
+      }
+      const snapshot = await runEncodedHappyUpdateWorker(encodedPayload)
+      process.exit(snapshot.phase === 'failed' ? 1 : 0)
     } else if (daemonSubcommand === 'stop') {
       await stopDaemon()
       process.exit(0)

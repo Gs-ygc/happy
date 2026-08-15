@@ -35,6 +35,9 @@ import {
   codexManagedPolicyPath,
   resolveCodexHome,
 } from '@/codex/codexManagedPolicy';
+import { HappyUpdateJournal } from './happyUpdateJournal';
+import { HappyUpdateManager } from './happyUpdateManager';
+import { spawnHappyUpdateWorker } from './happyUpdateUpdater';
 
 /** Shell-escape a string for safe interpolation into tmux commands. */
 function shellescape(s: string): string {
@@ -892,6 +895,21 @@ export async function startDaemon(): Promise<void> {
       onHappySessionWebhook
     });
 
+    const happyUpdateJournal = new HappyUpdateJournal({ rootDir: configuration.happyUpdatesDir });
+    await happyUpdateJournal.prune().catch((error) => {
+      logger.warn('[DAEMON RUN] Failed to prune Happy update journal', error);
+    });
+    const happyUpdateManager = new HappyUpdateManager({
+      journal: happyUpdateJournal,
+      launchWorker: (request) => {
+        spawnHappyUpdateWorker({
+          request,
+          daemonPid: process.pid,
+          daemonPort: controlPort,
+        });
+      },
+    });
+
     // Write initial daemon state (no lock needed for state file)
     const fileState: DaemonLocallyPersistedState = {
       pid: process.pid,
@@ -968,6 +986,7 @@ export async function startDaemon(): Promise<void> {
         restart: restartCodexSessions,
         update: async (targetVersion) => updateCodexCli(targetVersion),
       },
+      happyUpdates: happyUpdateManager,
       onMetadataUpdate: applyCodexPolicy,
     });
 

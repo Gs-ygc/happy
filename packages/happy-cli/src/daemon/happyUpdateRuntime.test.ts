@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     HappyUpdateJournal,
     HAPPY_UPDATE_RETENTION_MS,
@@ -9,9 +9,11 @@ import {
 import {
     buildHappyNpmInstallCommand,
     downloadHappyUpdateAsset,
+    decodeHappyUpdateWorkerPayload,
     hashFileSha256,
     sanitizeHappyUpdateError,
     validateHappyPackageManifest,
+    runHappyUpdateWorker,
 } from './happyUpdateUpdater';
 
 const snapshots = [
@@ -86,6 +88,16 @@ describe('Happy update runtime validation', () => {
         expect(sanitizeHappyUpdateError(new Error('token=secret-value /tmp/private'))).toBe('token=[redacted] /tmp/private');
     });
 
+    it('strictly decodes the detached worker payload', () => {
+        const encoded = Buffer.from(JSON.stringify({
+            request: validWorkerRequest,
+            daemonPid: 10,
+            daemonPort: 20,
+        })).toString('base64url');
+        expect(decodeHappyUpdateWorkerPayload(encoded)).toMatchObject({ daemonPid: 10, daemonPort: 20 });
+        expect(() => decodeHappyUpdateWorkerPayload(Buffer.from('{}').toString('base64url'))).toThrow();
+    });
+
     it('downloads within the size limit and verifies the file digest', async () => {
         const rootDir = await mkdtemp(join(tmpdir(), 'happy-update-download-'));
         tempDirs.push(rootDir);
@@ -96,4 +108,72 @@ describe('Happy update runtime validation', () => {
 
         expect(await hashFileSha256(destination)).toBe('b7f76c6b0c1d0213004e3cf5b2e25f8d2dbc70279d5a02776e6a146b23dfc8ab');
     });
+
+    it('records a completed update only after the target daemon version is running', async () => {
+        const rootDir = await mkdtemp(join(tmpdir(), 'happy-update-worker-success-'));
+        tempDirs.push(rootDir);
+        const journal = new HappyUpdateJournal({ rootDir, now: () => 500 });
+        const installTarball = vi.fn().mockResolvedValue(undefined);
+        const startDaemon = vi.fn().mockResolvedValue(undefined);
+
+        await runHappyUpdateWorker({ request: { ...validWorkerRequest }, daemonPid: 10, daemonPort: 20 }, {
+            journal,
+            workDir: join(rootDir, 'work'),
+            currentVersion: '1.2.4',
+            download: vi.fn().mockResolvedValue(undefined),
+            hash: vi.fn().mockResolvedValue(validWorkerRequest.sha256),
+            readManifest: vi.fn().mockResolvedValue({ name: 'happy', version: '1.2.5' }),
+            backupCurrent: vi.fn().mockResolvedValue('/tmp/happy-1.2.4.tgz'),
+            installTarball,
+            stopDaemon: vi.fn().mockResolvedValue(undefined),
+            startDaemon,
+            waitForDaemonVersion: vi.fn().mockResolvedValue('1.2.5'),
+            now: () => 500,
+        });
+
+        expect(await journal.read(validWorkerRequest.operationId)).toMatchObject({
+            phase: 'completed',
+            progress: 100,
+            installedVersion: '1.2.5',
+        });
+        expect(installTarball).toHaveBeenCalledWith(expect.stringContaining('happy-1.2.5.tgz'));
+        expect(startDaemon).toHaveBeenCalledOnce();
+    });
+
+    it('restores the backup and records recovered when installation fails', async () => {
+        const rootDir = await mkdtemp(join(tmpdir(), 'happy-update-worker-recover-'));
+        tempDirs.push(rootDir);
+        const journal = new HappyUpdateJournal({ rootDir, now: () => 600 });
+        const installTarball = vi.fn()
+            .mockRejectedValueOnce(new Error('install failed token=secret'))
+            .mockResolvedValueOnce(undefined);
+
+        await runHappyUpdateWorker({ request: { ...validWorkerRequest }, daemonPid: 10, daemonPort: 20 }, {
+            journal,
+            workDir: join(rootDir, 'work'),
+            currentVersion: '1.2.4',
+            download: vi.fn().mockResolvedValue(undefined),
+            hash: vi.fn().mockResolvedValue(validWorkerRequest.sha256),
+            readManifest: vi.fn().mockResolvedValue({ name: 'happy', version: '1.2.5' }),
+            backupCurrent: vi.fn().mockResolvedValue('/tmp/happy-1.2.4.tgz'),
+            installTarball,
+            stopDaemon: vi.fn().mockResolvedValue(undefined),
+            startDaemon: vi.fn().mockResolvedValue(undefined),
+            waitForDaemonVersion: vi.fn().mockResolvedValue('1.2.4'),
+            now: () => 600,
+        });
+
+        expect(installTarball).toHaveBeenNthCalledWith(2, '/tmp/happy-1.2.4.tgz');
+        expect(await journal.read(validWorkerRequest.operationId)).toMatchObject({
+            phase: 'recovered',
+            installedVersion: '1.2.4',
+        });
+    });
 });
+
+const validWorkerRequest = {
+    operationId: 'worker-1',
+    targetVersion: '1.2.5',
+    assetUrl: 'https://github.com/Gs-ygc/happy/releases/download/cli-1.2.5/happy-1.2.5.tgz',
+    sha256: 'a'.repeat(64),
+};

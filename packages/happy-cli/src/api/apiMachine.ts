@@ -25,6 +25,7 @@ import {
 import { CodexAppServerClient } from '@/codex/codexAppServerClient';
 import { CodexDeviceOperationManager, type CodexDeviceOperationDependencies } from '@/codex/codexDeviceOperations';
 import type { CodexOperationRequest } from '@slopus/happy-wire';
+import type { HappyUpdateManager } from '@/daemon/happyUpdateManager';
 import {
     CodexForkRewindPointNotFoundError,
     forkCodexThread,
@@ -96,6 +97,7 @@ type MachineRpcHandlers = {
     stopSession: (sessionId: string) => boolean;
     requestShutdown: () => void;
     codexOperations?: CodexDeviceOperationDependencies;
+    happyUpdates?: Pick<HappyUpdateManager, 'start' | 'get'>;
     onMetadataUpdate?: (metadata: MachineMetadata) => Promise<void> | void;
 }
 
@@ -151,6 +153,7 @@ export class ApiMachineClient {
         stopSession,
         requestShutdown,
         codexOperations,
+        happyUpdates,
         onMetadataUpdate,
     }: MachineRpcHandlers) {
         this.resumeSessionHandler = resumeSession ?? null;
@@ -168,6 +171,16 @@ export class ApiMachineClient {
                     throw new Error('operationId is required');
                 }
                 return this.codexOperationManager.get(params.operationId);
+            });
+        }
+
+        if (happyUpdates) {
+            this.rpcHandlerManager.registerHandler('happy-update-start', (params) => happyUpdates.start(params));
+            this.rpcHandlerManager.registerHandler('happy-update-status', (params: { operationId?: unknown }) => {
+                if (typeof params?.operationId !== 'string' || params.operationId.trim().length === 0) {
+                    throw new Error('operationId is required');
+                }
+                return happyUpdates.get(params.operationId);
             });
         }
 
