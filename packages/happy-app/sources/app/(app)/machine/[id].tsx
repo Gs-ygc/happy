@@ -8,7 +8,7 @@ import { Typography } from '@/constants/Typography';
 import { storage, useSessions, useAllMachines, useMachine, useSettings } from '@/sync/storage';
 import { Ionicons, Octicons } from '@expo/vector-icons';
 import type { Session } from '@/sync/storageTypes';
-import { machineStopDaemon, machineUpdateMetadata, machinePatchMetadata, machineDelete, machineCodexOperationStart, machineCodexOperationStatus } from '@/sync/ops';
+import { machineStopDaemon, machineUpdateMetadata, machinePatchMetadata, machineDelete, machineCodexOperationStart, machineCodexOperationStatus, machineHappyUpdateStart, machineHappyUpdateStatus } from '@/sync/ops';
 import { Modal } from '@/modal';
 import { formatPathRelativeToHome, getSessionName, getSessionSubtitle } from '@/utils/sessionUtils';
 import { isMachineOnline } from '@/utils/machineUtils';
@@ -19,10 +19,11 @@ import { useNavigateToSession } from '@/hooks/useNavigateToSession';
 import { machineSpawnNewSession } from '@/sync/ops';
 import { resolveAbsolutePath } from '@/utils/pathUtils';
 import { MultiTextInput, type MultiTextInputHandle } from '@/components/MultiTextInput';
-import type { CodexOperationKind, CodexOperationSnapshot, CodexStatus } from '@slopus/happy-wire';
+import type { CodexOperationKind, CodexOperationSnapshot, CodexStatus, HappyUpdateOperationSnapshot } from '@slopus/happy-wire';
 import type { CodexDeviceGroup } from '@slopus/happy-wire';
 import { assignMachineToCodexDeviceGroup, removeCodexDeviceGroup, resolveCodexPolicyAssignment, upsertCodexDeviceGroup } from '@/sync/codexDeviceGroups';
 import { CodexPolicyEditor } from '@/components/CodexPolicyEditor';
+import { fetchLatestHappyCliRelease, isHappySelfUpdateSupported } from '@/sync/happyUpdate';
 
 const styles = StyleSheet.create((theme) => ({
     pathInputContainer: {
@@ -87,6 +88,8 @@ export default function MachineDetailScreen() {
     const [codexOperation, setCodexOperation] = useState<CodexOperationSnapshot | null>(null);
     const [isCodexBusy, setIsCodexBusy] = useState(false);
     const [isApplyingCodexGroup, setIsApplyingCodexGroup] = useState(false);
+    const [happyUpdateOperation, setHappyUpdateOperation] = useState<HappyUpdateOperationSnapshot | null>(null);
+    const [isHappyUpdateBusy, setIsHappyUpdateBusy] = useState(false);
     // Variant D only
 
     const machineSessions = useMemo(() => {
@@ -109,6 +112,8 @@ export default function MachineDetailScreen() {
         settings.codexDeviceGroups.find((group) => group.machineIds.includes(machineId!)) ?? null
     ), [machineId, settings.codexDeviceGroups]);
     const hasPendingCodexOperation = codexOperation?.state === 'queued' || codexOperation?.state === 'running';
+    const hasPendingHappyUpdate = happyUpdateOperation !== null
+        && !['completed', 'failed', 'recovered'].includes(happyUpdateOperation.phase);
 
     const recentPaths = useMemo(() => {
         const paths = new Set<string>();
@@ -235,6 +240,83 @@ export default function MachineDetailScreen() {
             Modal.alert(t('common.error'), error instanceof Error ? error.message : 'The device is unavailable.');
         } finally {
             setIsCodexBusy(false);
+        }
+    };
+
+    const pollHappyUpdate = async (targetMachineId: string, initial: HappyUpdateOperationSnapshot) => {
+        let snapshot = initial;
+        for (let attempt = 0; attempt < 400 && !['completed', 'failed', 'recovered'].includes(snapshot.phase); attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            try {
+                const next = await machineHappyUpdateStatus(targetMachineId, snapshot.operationId);
+                if (next) {
+                    snapshot = next;
+                    setHappyUpdateOperation(next);
+                }
+            } catch {
+                // A disconnect is expected while the updater replaces the daemon.
+                if (attempt % 4 === 0) await sync.refreshMachines().catch(() => undefined);
+            }
+        }
+        await sync.refreshMachines().catch(() => undefined);
+        return snapshot;
+    };
+
+    const runHappyUpdate = async () => {
+        if (!machine || !machineId || isHappyUpdateBusy || hasPendingHappyUpdate || !isMachineOnline(machine)) return;
+        const installedVersion = machine.metadata?.happyCliVersion || machine.daemonState?.startedWithCliVersion;
+        if (!isHappySelfUpdateSupported(installedVersion)) {
+            Modal.alert(
+                'One-time bootstrap required',
+                'This device daemon is too old for remote updates. Install Happy CLI 1.2.5 or newer once through SSH, then future updates can run here.',
+            );
+            return;
+        }
+        setIsHappyUpdateBusy(true);
+        try {
+            const release = await fetchLatestHappyCliRelease(installedVersion!);
+            if (!release) {
+                Modal.alert('Happy CLI is current', `Version ${installedVersion} is already the newest published CLI.`);
+                return;
+            }
+            const confirmed = await Modal.confirm(
+                'Update Happy and restart daemon?',
+                `Update ${installedVersion} to ${release.version}. Existing session processes stay alive while the daemon reconnects.`,
+                { confirmText: 'Update' },
+            );
+            if (!confirmed) return;
+            const operationId = sync.encryption.generateId();
+            const started = await machineHappyUpdateStart(machineId, {
+                operationId,
+                targetVersion: release.version,
+                assetUrl: release.assetUrl,
+                sha256: release.sha256,
+            });
+            setHappyUpdateOperation(started);
+            const result = await pollHappyUpdate(machineId, started);
+            if (result.phase === 'completed') {
+                Modal.alert('Happy CLI updated', `Device restarted with Happy CLI ${result.installedVersion || release.version}.`);
+            } else if (result.phase === 'recovered') {
+                Modal.alert('Update rolled back', result.error || 'The previous Happy CLI version was restored.');
+            } else if (result.phase === 'failed') {
+                Modal.alert('Happy update failed', result.error || 'Manual repair may be required on this device.');
+            } else {
+                Modal.alert('Update still running', 'You can continue monitoring this operation from the device page.');
+            }
+        } catch (error) {
+            Modal.alert(t('common.error'), error instanceof Error ? error.message : 'Happy update could not be started.');
+        } finally {
+            setIsHappyUpdateBusy(false);
+        }
+    };
+
+    const continueHappyUpdate = async () => {
+        if (!machineId || !happyUpdateOperation || !hasPendingHappyUpdate || isHappyUpdateBusy) return;
+        setIsHappyUpdateBusy(true);
+        try {
+            await pollHappyUpdate(machineId, happyUpdateOperation);
+        } finally {
+            setIsHappyUpdateBusy(false);
         }
     };
 
@@ -481,6 +563,8 @@ export default function MachineDetailScreen() {
 
     const metadata = machine.metadata;
     const machineName = metadata?.displayName || metadata?.host || 'unknown machine';
+    const happyCliVersion = metadata?.happyCliVersion || machine.daemonState?.startedWithCliVersion || null;
+    const happySelfUpdateSupported = isHappySelfUpdateSupported(happyCliVersion);
 
     const spawnButtonDisabled = !customPath.trim() || isSpawning || !isMachineOnline(machine!);
 
@@ -695,6 +779,40 @@ export default function MachineDetailScreen() {
                             title={t('machine.daemonStateVersion')}
                             subtitle={String(machine.daemonStateVersion)}
                         />
+                </ItemGroup>
+
+                <ItemGroup title="Happy CLI">
+                    <Item
+                        title="Installed version"
+                        subtitle={happyCliVersion || 'Unknown'}
+                        subtitleStyle={{ fontFamily: 'Menlo', fontSize: 13 }}
+                        showChevron={false}
+                    />
+                    <Item
+                        title={happySelfUpdateSupported ? 'Update Happy & restart daemon' : 'One-time bootstrap required'}
+                        subtitle={happyUpdateOperation
+                            ? `${happyUpdateOperation.phase} (${happyUpdateOperation.progress}%)`
+                            : happySelfUpdateSupported
+                                ? 'Checks the verified Gs-ygc/happy CLI release'
+                                : 'Install Happy CLI 1.2.5 or newer once through SSH'}
+                        onPress={() => void runHappyUpdate()}
+                        disabled={isHappyUpdateBusy || hasPendingHappyUpdate || !isMachineOnline(machine)}
+                        rightElement={isHappyUpdateBusy
+                            ? <ActivityIndicator size="small" />
+                            : <Ionicons
+                                name={happySelfUpdateSupported ? 'cloud-download-outline' : 'terminal-outline'}
+                                size={20}
+                                color={theme.colors.textSecondary}
+                            />}
+                    />
+                    {hasPendingHappyUpdate && !isHappyUpdateBusy && (
+                        <Item
+                            title="Continue monitoring Happy update"
+                            subtitle={`${happyUpdateOperation!.phase} (${happyUpdateOperation!.progress}%)`}
+                            onPress={() => void continueHappyUpdate()}
+                            rightElement={<Ionicons name="pulse-outline" size={20} color={theme.colors.textSecondary} />}
+                        />
+                    )}
                 </ItemGroup>
 
                 {/* CLI Availability */}

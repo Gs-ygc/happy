@@ -7,7 +7,12 @@ import { apiSocket } from './apiSocket';
 import { sync } from './sync';
 import { storage } from './storage';
 import type { MachineMetadata, Metadata, SessionAgentModesPatch } from './storageTypes';
-import type { CodexOperationRequest, CodexOperationSnapshot } from '@slopus/happy-wire';
+import type {
+    CodexOperationRequest,
+    CodexOperationSnapshot,
+    HappyUpdateOperationSnapshot,
+    HappyUpdateRequest,
+} from '@slopus/happy-wire';
 import { mergeMachineMetadataPatch } from './machineMetadataPatch';
 import { markAgentModePushPending, clearAgentModePushPending, type AgentModeField } from './agentModesPending';
 import {
@@ -555,6 +560,28 @@ export async function machineCodexOperationStatus(
     return apiSocket.machineRPC<CodexOperationSnapshot | null, { operationId: string }>(
         machineId,
         'codex-operation-status',
+        { operationId },
+    );
+}
+
+export async function machineHappyUpdateStart(
+    machineId: string,
+    request: HappyUpdateRequest,
+): Promise<HappyUpdateOperationSnapshot> {
+    return apiSocket.machineRPC<HappyUpdateOperationSnapshot, HappyUpdateRequest>(
+        machineId,
+        'happy-update-start',
+        request,
+    );
+}
+
+export async function machineHappyUpdateStatus(
+    machineId: string,
+    operationId: string,
+): Promise<HappyUpdateOperationSnapshot | null> {
+    return apiSocket.machineRPC<HappyUpdateOperationSnapshot | null, { operationId: string }>(
+        machineId,
+        'happy-update-status',
         { operationId },
     );
 }
