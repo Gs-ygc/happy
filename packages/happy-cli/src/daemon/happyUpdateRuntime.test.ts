@@ -38,6 +38,15 @@ describe('HappyUpdateJournal', () => {
         expect(await readFile(join(rootDir, 'op-1.json'), 'utf8')).toContain('"phase": "queued"');
     });
 
+    it('rejects unsafe operation ids before resolving journal paths', async () => {
+        const rootDir = await mkdtemp(join(tmpdir(), 'happy-update-journal-'));
+        tempDirs.push(rootDir);
+        const journal = new HappyUpdateJournal({ rootDir });
+
+        await expect(journal.read('../escape')).rejects.toThrow(/operationId/);
+        await expect(journal.readRequest('nested/update')).rejects.toThrow(/operationId/);
+    });
+
     it('prunes entries older than seven days and keeps at most 100 recent entries', async () => {
         const now = 10 * HAPPY_UPDATE_RETENTION_MS;
         const rootDir = await mkdtemp(join(tmpdir(), 'happy-update-prune-'));

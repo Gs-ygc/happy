@@ -1,6 +1,7 @@
 import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
+    HappyUpdateOperationIdSchema,
     HappyUpdateOperationSnapshotSchema,
     HappyUpdateRequestSchema,
     type HappyUpdateOperationSnapshot,
@@ -30,11 +31,13 @@ export class HappyUpdateJournal {
     }
 
     private pathFor(operationId: string): string {
-        return join(this.options.rootDir, `${operationId}.json`);
+        const validated = HappyUpdateOperationIdSchema.parse(operationId);
+        return join(this.options.rootDir, `${validated}.json`);
     }
 
     private requestPathFor(operationId: string): string {
-        return join(this.options.rootDir, `${operationId}.request`);
+        const validated = HappyUpdateOperationIdSchema.parse(operationId);
+        return join(this.options.rootDir, `${validated}.request`);
     }
 
     async read(operationId: string): Promise<HappyUpdateOperationSnapshot | null> {
