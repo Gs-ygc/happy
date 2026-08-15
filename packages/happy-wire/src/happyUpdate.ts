@@ -1,11 +1,12 @@
 import { z } from 'zod';
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const OPERATION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ASSET_HOST = 'github.com';
 const REPOSITORY_PATH = '/Gs-ygc/happy/releases/download/';
 
 export const HappyUpdateRequestSchema = z.object({
-    operationId: z.string().trim().min(1).max(128),
+    operationId: z.string().trim().regex(OPERATION_ID, 'operationId contains invalid characters'),
     targetVersion: z.string().trim().regex(SEMVER, 'targetVersion must be a semantic version'),
     assetUrl: z.string().url().max(2048),
     sha256: z.string().regex(/^[a-f0-9]{64}$/, 'sha256 must be a lowercase SHA-256 digest'),
@@ -39,7 +40,7 @@ export const HappyUpdatePhaseSchema = z.enum([
 export type HappyUpdatePhase = z.infer<typeof HappyUpdatePhaseSchema>;
 
 export const HappyUpdateOperationSnapshotSchema = z.object({
-    operationId: z.string().trim().min(1).max(128),
+    operationId: z.string().trim().regex(OPERATION_ID, 'operationId contains invalid characters'),
     targetVersion: z.string().trim().regex(SEMVER),
     phase: HappyUpdatePhaseSchema,
     progress: z.number().int().min(0).max(100),

@@ -28,6 +28,18 @@ describe('Happy update wire contract', () => {
         expect(() => HappyUpdateRequestSchema.parse({ ...validRequest, command: 'npm install' })).toThrow();
     });
 
+    it('rejects operation ids that could escape the update journal directory', () => {
+        expect(() => HappyUpdateRequestSchema.parse({ ...validRequest, operationId: '../escape' })).toThrow();
+        expect(() => HappyUpdateRequestSchema.parse({ ...validRequest, operationId: 'nested/update' })).toThrow();
+        expect(() => HappyUpdateOperationSnapshotSchema.parse({
+            operationId: '../escape',
+            targetVersion: validRequest.targetVersion,
+            phase: 'queued',
+            progress: 0,
+            updatedAt: 123,
+        })).toThrow();
+    });
+
     it('accepts each lifecycle phase and bounds snapshot progress', () => {
         const phases = ['queued', 'downloading', 'verifying', 'installing', 'stopping-daemon', 'starting-daemon', 'completed', 'failed', 'recovered'] as const;
         for (const phase of phases) expect(HappyUpdatePhaseSchema.parse(phase)).toBe(phase);
