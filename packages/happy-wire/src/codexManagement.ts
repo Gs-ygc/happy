@@ -1,5 +1,29 @@
 import { z } from 'zod';
 
+export const CODEX_CONFIG_MAX_BYTES = 64 * 1024;
+const SHA256_HEX = /^[a-f0-9]{64}$/;
+const CodexConfigContentSchema = z.string()
+    .max(CODEX_CONFIG_MAX_BYTES)
+    .refine(
+        (value) => new TextEncoder().encode(value).byteLength <= CODEX_CONFIG_MAX_BYTES,
+        'Codex config exceeds the UTF-8 byte limit',
+    );
+
+export const CodexConfigSnapshotSchema = z.object({
+    path: z.string().trim().min(1).max(4096),
+    content: CodexConfigContentSchema,
+    exists: z.boolean(),
+    sha256: z.string().regex(SHA256_HEX),
+    modifiedAt: z.number().nonnegative().nullable(),
+}).strict();
+export type CodexConfigSnapshot = z.infer<typeof CodexConfigSnapshotSchema>;
+
+export const CodexConfigWriteRequestSchema = z.object({
+    content: CodexConfigContentSchema,
+    expectedSha256: z.string().regex(SHA256_HEX),
+}).strict();
+export type CodexConfigWriteRequest = z.infer<typeof CodexConfigWriteRequestSchema>;
+
 export const CodexOperationKindSchema = z.enum(['status', 'restart', 'update']);
 export type CodexOperationKind = z.infer<typeof CodexOperationKindSchema>;
 

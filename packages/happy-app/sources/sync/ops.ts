@@ -8,6 +8,8 @@ import { sync } from './sync';
 import { storage } from './storage';
 import type { MachineMetadata, Metadata, SessionAgentModesPatch } from './storageTypes';
 import type {
+    CodexConfigSnapshot,
+    CodexConfigWriteRequest,
     CodexOperationRequest,
     CodexOperationSnapshot,
     HappyUpdateOperationSnapshot,
@@ -561,6 +563,25 @@ export async function machineCodexOperationStatus(
         machineId,
         'codex-operation-status',
         { operationId },
+    );
+}
+
+export async function machineCodexConfigRead(machineId: string): Promise<CodexConfigSnapshot> {
+    return apiSocket.machineRPC<CodexConfigSnapshot, Record<string, never>>(
+        machineId,
+        'codex-config-read',
+        {},
+    );
+}
+
+export async function machineCodexConfigWrite(
+    machineId: string,
+    request: CodexConfigWriteRequest,
+): Promise<CodexConfigSnapshot> {
+    return apiSocket.machineRPC<CodexConfigSnapshot, CodexConfigWriteRequest>(
+        machineId,
+        'codex-config-write',
+        request,
     );
 }
 

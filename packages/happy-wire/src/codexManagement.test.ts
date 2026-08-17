@@ -2,9 +2,38 @@ import { describe, expect, it } from 'vitest';
 import {
     CodexDeviceGroupsSchema,
     CodexPolicyAssignmentSchema,
+    CodexConfigSnapshotSchema,
+    CodexConfigWriteRequestSchema,
     CodexOperationRequestSchema,
     CodexOperationSnapshotSchema,
 } from './codexManagement';
+
+describe('Codex config file wire contract', () => {
+    it('accepts an exact device config snapshot', () => {
+        expect(CodexConfigSnapshotSchema.parse({
+            path: '/home/user/.codex/config.toml',
+            content: 'model = "gpt-5.6-sol"\n',
+            exists: true,
+            sha256: 'a'.repeat(64),
+            modifiedAt: 123,
+        })).toMatchObject({ exists: true, modifiedAt: 123 });
+    });
+
+    it('rejects oversized config writes', () => {
+        expect(CodexConfigWriteRequestSchema).toBeDefined();
+        expect(() => CodexConfigWriteRequestSchema.parse({
+            content: 'x'.repeat(64 * 1024 + 1),
+            expectedSha256: 'a'.repeat(64),
+        })).toThrow();
+    });
+
+    it('measures the config limit in UTF-8 bytes instead of JavaScript characters', () => {
+        expect(() => CodexConfigWriteRequestSchema.parse({
+            content: '你'.repeat(30_000),
+            expectedSha256: 'a'.repeat(64),
+        })).toThrow();
+    });
+});
 
 describe('Codex management wire contract', () => {
     it('accepts the minimal idempotent operation request', () => {

@@ -8,10 +8,11 @@ import { Typography } from '@/constants/Typography';
 import { storage, useSessions, useAllMachines, useMachine, useSettings } from '@/sync/storage';
 import { Ionicons, Octicons } from '@expo/vector-icons';
 import type { Session } from '@/sync/storageTypes';
-import { machineStopDaemon, machineUpdateMetadata, machinePatchMetadata, machineDelete, machineCodexOperationStart, machineCodexOperationStatus, machineHappyUpdateStart, machineHappyUpdateStatus } from '@/sync/ops';
+import { machineStopDaemon, machineUpdateMetadata, machinePatchMetadata, machineDelete, machineCodexOperationStart, machineCodexOperationStatus, machineCodexConfigRead, machineCodexConfigWrite, machineHappyUpdateStart, machineHappyUpdateStatus } from '@/sync/ops';
 import { Modal } from '@/modal';
 import { formatPathRelativeToHome, getSessionName, getSessionSubtitle } from '@/utils/sessionUtils';
 import { isMachineOnline } from '@/utils/machineUtils';
+import { resolveMachineHappyVersion } from '@/utils/machineHappyVersion';
 import { sync } from '@/sync/sync';
 import { useUnistyles, StyleSheet } from 'react-native-unistyles';
 import { t } from '@/text';
@@ -19,10 +20,11 @@ import { useNavigateToSession } from '@/hooks/useNavigateToSession';
 import { machineSpawnNewSession } from '@/sync/ops';
 import { resolveAbsolutePath } from '@/utils/pathUtils';
 import { MultiTextInput, type MultiTextInputHandle } from '@/components/MultiTextInput';
-import type { CodexOperationKind, CodexOperationSnapshot, CodexStatus, HappyUpdateOperationSnapshot } from '@slopus/happy-wire';
+import type { CodexConfigWriteRequest, CodexOperationKind, CodexOperationSnapshot, CodexStatus, HappyUpdateOperationSnapshot } from '@slopus/happy-wire';
 import type { CodexDeviceGroup } from '@slopus/happy-wire';
 import { assignMachineToCodexDeviceGroup, removeCodexDeviceGroup, resolveCodexPolicyAssignment, upsertCodexDeviceGroup } from '@/sync/codexDeviceGroups';
 import { CodexPolicyEditor } from '@/components/CodexPolicyEditor';
+import { CodexConfigEditor } from '@/components/CodexConfigEditor';
 import { fetchLatestHappyCliRelease, isHappySelfUpdateSupported } from '@/sync/happyUpdate';
 import { classifyHappyUpdateRetry, HappyUpdateBatchTimeoutError, runHappyUpdateBatch, summarizeHappyUpdateBatch, type HappyUpdateBatchResult } from '@/sync/happyUpdateBatch';
 import { loadHappyDeviceUpdate, loadHappyGroupUpdate, saveHappyDeviceUpdate, saveHappyGroupUpdate } from '@/sync/happyUpdatePersistence';
@@ -90,6 +92,7 @@ export default function MachineDetailScreen() {
     const [codexOperation, setCodexOperation] = useState<CodexOperationSnapshot | null>(null);
     const [isCodexBusy, setIsCodexBusy] = useState(false);
     const [isApplyingCodexGroup, setIsApplyingCodexGroup] = useState(false);
+    const [isOpeningCodexConfig, setIsOpeningCodexConfig] = useState(false);
     const [happyUpdateOperation, setHappyUpdateOperation] = useState<HappyUpdateOperationSnapshot | null>(() => machineId ? loadHappyDeviceUpdate(machineId)?.snapshot ?? null : null);
     const [happyVerificationPending, setHappyVerificationPending] = useState(() => machineId ? loadHappyDeviceUpdate(machineId)?.verificationPending === true : false);
     const [isHappyUpdateBusy, setIsHappyUpdateBusy] = useState(false);
@@ -295,7 +298,7 @@ export default function MachineDetailScreen() {
         for (let attempt = 0; attempt < 20; attempt++) {
             await sync.refreshMachines().catch(() => undefined);
             const candidate = storage.getState().machines[targetMachineId];
-            const installedVersion = candidate?.metadata?.happyCliVersion || candidate?.daemonState?.startedWithCliVersion;
+            const installedVersion = resolveMachineHappyVersion(candidate);
             if (candidate && isMachineOnline(candidate) && installedVersion === targetVersion) return true;
             await new Promise((resolve) => setTimeout(resolve, 1500));
         }
@@ -304,7 +307,7 @@ export default function MachineDetailScreen() {
 
     const runHappyUpdate = async () => {
         if (!machine || !machineId || isHappyUpdateBusy || hasHappyContinuation || !isMachineOnline(machine)) return;
-        const installedVersion = machine.metadata?.happyCliVersion || machine.daemonState?.startedWithCliVersion;
+        const installedVersion = resolveMachineHappyVersion(machine);
         if (!isHappySelfUpdateSupported(installedVersion)) {
             Modal.alert(
                 'One-time bootstrap required',
@@ -454,7 +457,7 @@ export default function MachineDetailScreen() {
             }
             const release = await fetchLatestHappyCliRelease('0.0.0');
             if (!release) return;
-            const target = { ...result.target, online: true, installedVersion: machineTarget.metadata?.happyCliVersion || machineTarget.daemonState?.startedWithCliVersion, targetVersion: release.version };
+            const target = { ...result.target, online: true, installedVersion: resolveMachineHappyVersion(machineTarget), targetVersion: release.version };
             let nextResult: HappyUpdateBatchResult;
             if (mode === 'continue' && result.snapshot) {
                 const snapshot = await monitorHappyBatchTarget(target, result.snapshot, (next) => {
@@ -482,7 +485,7 @@ export default function MachineDetailScreen() {
             await Promise.all(pending.map(async (result) => {
                 const machineTarget = allMachines.find((candidate) => candidate.id === result.target.machineId);
                 if (!machineTarget) return;
-                const target = { ...result.target, online: isMachineOnline(machineTarget), installedVersion: machineTarget.metadata?.happyCliVersion || machineTarget.daemonState?.startedWithCliVersion };
+                const target = { ...result.target, online: isMachineOnline(machineTarget), installedVersion: resolveMachineHappyVersion(machineTarget) };
                 const snapshot = await monitorHappyBatchTarget(target, result.snapshot!, (next) => {
                     latest = latest.map((item) => item.target.machineId === target.machineId ? { ...item, status: 'updating', snapshot: next } : item);
                     updateHappyBatchResults(latest);
@@ -528,7 +531,7 @@ export default function MachineDetailScreen() {
                 machineId: candidate.id,
                 name: candidate.metadata?.displayName || candidate.metadata?.host || candidate.id,
                 online: isMachineOnline(candidate),
-                installedVersion: candidate.metadata?.happyCliVersion || candidate.daemonState?.startedWithCliVersion,
+                installedVersion: resolveMachineHappyVersion(candidate),
                 targetVersion: release.version,
             }));
             const results = await runHappyUpdateBatch(targets, async (target, report) => {
@@ -642,6 +645,26 @@ export default function MachineDetailScreen() {
                 },
             },
         });
+    };
+
+    const editDeviceCodexConfig = async () => {
+        if (!machine || !machineId || isOpeningCodexConfig || !isMachineOnline(machine)) return;
+        setIsOpeningCodexConfig(true);
+        try {
+            const initialSnapshot = await machineCodexConfigRead(machineId);
+            Modal.show({
+                component: CodexConfigEditor,
+                props: {
+                    initialSnapshot,
+                    onReload: () => machineCodexConfigRead(machineId),
+                    onSave: (request: CodexConfigWriteRequest) => machineCodexConfigWrite(machineId, request),
+                },
+            });
+        } catch (error) {
+            Modal.alert(t('common.error'), error instanceof Error ? error.message : 'Failed to read Codex config');
+        } finally {
+            setIsOpeningCodexConfig(false);
+        }
     };
 
     const deleteCodexGroup = async (group: CodexDeviceGroup) => {
@@ -798,7 +821,7 @@ export default function MachineDetailScreen() {
 
     const metadata = machine.metadata;
     const machineName = metadata?.displayName || metadata?.host || 'unknown machine';
-    const happyCliVersion = metadata?.happyCliVersion || machine.daemonState?.startedWithCliVersion || null;
+    const happyCliVersion = resolveMachineHappyVersion(machine);
     const happySelfUpdateSupported = isHappySelfUpdateSupported(happyCliVersion);
 
     const spawnButtonDisabled = !customPath.trim() || isSpawning || !isMachineOnline(machine!);
@@ -1137,6 +1160,18 @@ export default function MachineDetailScreen() {
                         )}
                     </ItemGroup>
                 )}
+
+                <ItemGroup title="Codex configuration">
+                    <Item
+                        title="Edit config.toml"
+                        subtitle="Read current config from this device"
+                        onPress={() => void editDeviceCodexConfig()}
+                        disabled={isOpeningCodexConfig || !isMachineOnline(machine)}
+                        rightElement={isOpeningCodexConfig
+                            ? <ActivityIndicator size="small" />
+                            : <Ionicons name="document-text-outline" size={20} color={theme.colors.textSecondary} />}
+                    />
+                </ItemGroup>
 
                 {metadata?.cliAvailability?.codex && (
                     <ItemGroup title="Codex device group">

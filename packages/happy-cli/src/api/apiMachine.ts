@@ -24,13 +24,14 @@ import {
 } from '@/claude/utils/claudeSessionFork';
 import { CodexAppServerClient } from '@/codex/codexAppServerClient';
 import { CodexDeviceOperationManager, type CodexDeviceOperationDependencies } from '@/codex/codexDeviceOperations';
-import type { CodexOperationRequest } from '@slopus/happy-wire';
+import type { CodexConfigWriteRequest, CodexOperationRequest } from '@slopus/happy-wire';
 import type { HappyUpdateManager } from '@/daemon/happyUpdateManager';
 import {
     CodexForkRewindPointNotFoundError,
     forkCodexThread,
     listCodexRewindPoints,
 } from '@/codex/codexThreadFork';
+import { readCodexConfigFile, writeCodexConfigFile } from '@/codex/codexConfigFile';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -132,7 +133,8 @@ export class ApiMachineClient {
 
     constructor(
         private token: string,
-        private machine: Machine
+        private machine: Machine,
+        private detectedMachineMetadata?: MachineMetadata,
     ) {
         // Initialize RPC handler manager
         this.rpcHandlerManager = new RpcHandlerManager({
@@ -210,6 +212,13 @@ export class ApiMachineClient {
         });
 
         this.syncResumeSessionRpcRegistration();
+
+        this.rpcHandlerManager.registerHandler('codex-config-read', async () => {
+            return readCodexConfigFile();
+        });
+        this.rpcHandlerManager.registerHandler('codex-config-write', async (params: CodexConfigWriteRequest) => {
+            return writeCodexConfigFile(params);
+        });
 
         // Register stop session handler
         this.rpcHandlerManager.registerHandler('stop-session', (params: any) => {
@@ -491,7 +500,8 @@ export class ApiMachineClient {
                 status: 'running',
                 pid: process.pid,
                 httpPort: this.machine.daemonState?.httpPort,
-                startedAt: Date.now()
+                startedAt: Date.now(),
+                startedWithCliVersion: configuration.currentCliVersion,
             }));
 
             this.rpcHandlerManager.onSocketConnect(this.socket);
@@ -574,12 +584,17 @@ export class ApiMachineClient {
         const resumeSupportChanged = !prevResume
             || prevResume.rpcAvailable !== newResumeSupport.rpcAvailable
             || prevResume.happyAgentAuthenticated !== newResumeSupport.happyAgentAuthenticated;
+        const detectedMetadata = this.detectedMachineMetadata ?? {
+            happyCliVersion: configuration.currentCliVersion,
+        };
+        const happyCliVersionChanged = this.machine.metadata?.happyCliVersion !== detectedMetadata.happyCliVersion;
 
-        if (cliAvailabilityChanged || resumeSupportChanged) {
+        if (cliAvailabilityChanged || resumeSupportChanged || happyCliVersionChanged) {
             this.lastKnownCLIAvailability = newAvailability;
             this.lastKnownResumeSupport = newResumeSupport;
             this.updateMachineMetadata((metadata) => ({
                 ...(metadata || {} as any),
+                ...detectedMetadata,
                 cliAvailability: newAvailability,
                 resumeSupport: { ...newResumeSupport, rpcAvailable: !!this.resumeSessionHandler },
             })).catch((err) => {

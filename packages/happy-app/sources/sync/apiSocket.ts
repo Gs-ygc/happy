@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 import { TokenStorage } from '@/auth/tokenStorage';
 import { Encryption } from './encryption/encryption';
 import { storage } from './storage';
+import { unwrapRpcResponse } from './rpcResponse';
 
 export function getHappyClientId(): string {
     let platform: string = Platform.OS; // 'ios' | 'android' | 'web'
@@ -155,7 +156,7 @@ class ApiSocket {
         });
         
         if (result.ok) {
-            return await sessionEncryption.decryptRaw(result.result) as R;
+            return unwrapRpcResponse<R>(await sessionEncryption.decryptRaw(result.result));
         }
         throw new Error('RPC call failed');
     }
@@ -175,7 +176,7 @@ class ApiSocket {
         });
 
         if (result.ok) {
-            return await machineEncryption.decryptRaw(result.result) as R;
+            return unwrapRpcResponse<R>(await machineEncryption.decryptRaw(result.result));
         }
         throw new Error(result.error || 'RPC call failed');
     }

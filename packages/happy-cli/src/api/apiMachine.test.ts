@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiMachineClient } from './apiMachine';
 import type { Machine } from './types';
-import { encodeBase64, encrypt } from './encryption';
+import { decodeBase64, decrypt, encodeBase64, encrypt } from './encryption';
 
 const {
     mockIo,
@@ -174,6 +174,79 @@ describe('ApiMachineClient socket reconnection', () => {
         aliveCalls = mockSocket.emit.mock.calls.filter(([event]: [string]) => event === 'machine-alive');
         expect(aliveCalls).toHaveLength(2);
 
+        client.shutdown();
+    });
+
+    it('publishes the running CLI version in daemon state', async () => {
+        const machine = makeMachine();
+        mockSocket.emitWithAck.mockImplementation(async (event: string, payload: any) => ({
+            result: 'success',
+            version: 1,
+            daemonState: payload.daemonState,
+            metadata: payload.metadata,
+        }));
+
+        const client = new ApiMachineClient('fake-token', machine);
+        client.connect();
+        emitSocketEvent('connect');
+        await vi.waitFor(() => {
+            expect(mockSocket.emitWithAck.mock.calls.some(([event]: [string]) => event === 'machine-update-state')).toBe(true);
+        });
+
+        const stateCall = mockSocket.emitWithAck.mock.calls.find(([event]: [string]) => event === 'machine-update-state');
+        const state = decrypt(
+            machine.encryptionKey,
+            machine.encryptionVariant,
+            decodeBase64(stateCall[1].daemonState),
+        );
+        expect(state).toMatchObject({ status: 'running', startedWithCliVersion: 'test' });
+        client.shutdown();
+    });
+
+    it('refreshes a stale CLI version without replacing other machine metadata', async () => {
+        const machine = makeMachine();
+        machine.metadata = {
+            ...machine.metadata,
+            happyCliVersion: '1.2.0',
+            codexPolicyAssignment: null,
+            displayName: 'Build node',
+        } as typeof machine.metadata;
+        mockSocket.emitWithAck.mockImplementation(async (event: string, payload: any) => ({
+            result: 'success',
+            version: 1,
+            daemonState: payload.daemonState,
+            metadata: payload.metadata,
+        }));
+
+        const client = new ApiMachineClient('fake-token', machine, {
+            ...machine.metadata,
+            host: 'current-host',
+            happyCliVersion: 'test',
+            homeDir: '/current/home',
+            happyHomeDir: '/current/home/.happy',
+            happyLibDir: '/current/happy',
+        });
+        client.connect();
+        emitSocketEvent('connect');
+        await vi.waitFor(() => {
+            expect(mockSocket.emitWithAck.mock.calls.some(([event]: [string]) => event === 'machine-update-metadata')).toBe(true);
+        });
+
+        const metadataCall = mockSocket.emitWithAck.mock.calls.find(([event]: [string]) => event === 'machine-update-metadata');
+        const metadata = decrypt(
+            machine.encryptionKey,
+            machine.encryptionVariant,
+            decodeBase64(metadataCall[1].metadata),
+        ) as Record<string, unknown>;
+        expect(metadata).toMatchObject({
+            host: 'current-host',
+            happyCliVersion: 'test',
+            homeDir: '/current/home',
+            happyHomeDir: '/current/home/.happy',
+            happyLibDir: '/current/happy',
+            codexPolicyAssignment: null,
+            displayName: 'Build node',
+        });
         client.shutdown();
     });
 
