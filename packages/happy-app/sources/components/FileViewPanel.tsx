@@ -17,6 +17,7 @@ import { t } from '@/text';
 import { layout } from '@/components/layout';
 import { useSession } from '@/sync/storage';
 import { rigCanWriteFiles } from '@/sync/rig';
+import { shouldPollExternalFile } from './codeEditorPolicy';
 
 interface FileViewPanelProps {
     sessionId: string;
@@ -206,9 +207,10 @@ export const FileViewPanel = React.memo(function FileViewPanel({
         return () => { cancelled = true; };
     }, [sessionId, filePath]);
 
-    // Poll for external changes every 5s
+    // Avoid repeatedly reading and hashing large or locally modified files.
     React.useEffect(() => {
         if (fileState.kind !== 'loaded' || !fileState.originalHash) return;
+        if (!shouldPollExternalFile(fileState.content.length, editContent !== fileState.content)) return;
         const originalHash = fileState.originalHash;
 
         const interval = setInterval(async () => {
@@ -218,10 +220,10 @@ export const FileViewPanel = React.memo(function FileViewPanel({
             if (currentHash !== originalHash) {
                 setExternalChange(content);
             }
-        }, 5000);
+        }, 15000);
 
         return () => clearInterval(interval);
-    }, [sessionId, filePath, fileState]);
+    }, [sessionId, filePath, fileState, hasChanges]);
 
     const handleReload = React.useCallback(() => {
         if (!externalChange) return;

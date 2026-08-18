@@ -60,6 +60,7 @@ import { getNewSessionSidebarLayout } from '@/utils/newSessionSidebarLayout';
 import { getAgentPickerItems, getModePickerItems } from '@/utils/newSessionPickerItems';
 import { filterPathSuggestions, getDirectoryPathSuggestions, getPathAutocompleteRequest, getPathSuggestionValue } from '@/utils/newSessionPathAutocomplete';
 import { resolveAgentDefaultConfig } from '@/sync/agentDefaults';
+import { resolveNewSessionMachineId } from '@/utils/newSessionMachineSelection';
 
 // Agent icon assets
 const agentIcons = {
@@ -360,6 +361,7 @@ function PathPickerContent({
     const [selection, setSelection] = React.useState<{ start: number; end: number } | undefined>(undefined);
     const [directoryItems, setDirectoryItems] = React.useState<PickerItem[]>([]);
     const [isLoadingSuggestions, setIsLoadingSuggestions] = React.useState(false);
+    const [suggestionError, setSuggestionError] = React.useState<string | null>(null);
 
     React.useEffect(() => {
         const timeout = setTimeout(() => {
@@ -386,6 +388,7 @@ function PathPickerContent({
         if (!machineId || !request) {
             setDirectoryItems([]);
             setIsLoadingSuggestions(false);
+            setSuggestionError(null);
             return;
         }
         let cancelled = false;
@@ -398,11 +401,13 @@ function PathPickerContent({
             if (!result.success || !result.entries) {
                 setDirectoryItems([]);
                 setIsLoadingSuggestions(false);
+                setSuggestionError(result.error || 'Unable to load folders from this machine');
                 return;
             }
 
             setDirectoryItems(getDirectoryPathSuggestions(request, result.entries));
             setIsLoadingSuggestions(false);
+            setSuggestionError(null);
         }, 180);
 
         return () => {
@@ -523,6 +528,12 @@ function PathPickerContent({
                     <ActivityIndicator size="small" color={theme.colors.textSecondary} />
                 )}
             </View>
+
+            {suggestionError && (
+                <Text style={[pickerStyles.pathMetaText, { color: theme.colors.warning }]}>
+                    {suggestionError}
+                </Text>
+            )}
 
             <ScrollView
                 style={[pickerStyles.optionList, embedded && pickerStyles.embeddedOptionList]}
@@ -670,18 +681,17 @@ function NewSessionScreen() {
     const [modelIndex, setModelIndex] = React.useState(0);
     const [effortIndex, setEffortIndex] = React.useState(0);
     const [isSpawning, setIsSpawning] = React.useState(false);
+    const spawningRef = React.useRef(false);
     const [activePicker, setActivePicker] = React.useState<PickerType | null>(null);
 
     // Config collapse — auto-collapses when typing, expands when empty
     const [isConfigExpanded, setIsConfigExpanded] = React.useState(true);
 
-    // Auto-select first machine when none selected (first-ever use, no draft)
+    // Recover stale persisted selections and prefer an online machine.
     React.useEffect(() => {
-        if (selectedMachineId) return;
-        if (allMachines.length > 0) {
-            setSelectedMachineId(allMachines[0].id);
-        }
-    }, [allMachines, selectedMachineId]);
+        const resolvedMachineId = resolveNewSessionMachineId(allMachines, selectedMachineId);
+        if (resolvedMachineId !== selectedMachineId) setSelectedMachineId(resolvedMachineId);
+    }, [allMachines, selectedMachineId, setSelectedMachineId]);
 
     const selectedMachine = React.useMemo(
         () => allMachines.find(m => m.id === selectedMachineId) ?? null,
@@ -987,6 +997,7 @@ function NewSessionScreen() {
 
     // Spawn session handler
     const handleSend = React.useCallback(async (approvedNewDirectoryCreation: boolean = false) => {
+        if (spawningRef.current && !approvedNewDirectoryCreation) return;
         if (!selectedMachineId || !selectedMachine) {
             Modal.alert(t('common.error'), 'Please select a machine');
             return;
@@ -996,6 +1007,7 @@ function NewSessionScreen() {
             return;
         }
 
+        spawningRef.current = true;
         setIsSpawning(true);
         try {
             const pathToUse = trimPathInput(selectedPath) || '~';
@@ -1091,6 +1103,7 @@ function NewSessionScreen() {
                 : 'Failed to start session';
             Modal.alert(t('common.error'), errorMessage);
         } finally {
+            spawningRef.current = false;
             setIsSpawning(false);
         }
     }, [selectedMachineId, selectedMachine, selectedPath, selectedAgent, router, navigateToSession, currentPermission.key, currentModelKey, currentEffort?.key, effectiveAgentDefaults.permissionMode, effectiveAgentDefaults.modelMode, effectiveAgentDefaults.effortLevel, worktreeKey]);

@@ -25,6 +25,8 @@ export interface TrackedSession {
   childProcess?: ChildProcess;
   /** In-memory only. Never persisted because it may contain auth secrets. */
   spawnEnv?: NodeJS.ProcessEnv;
+  /** Agent selected when the daemon launched the session. */
+  spawnAgent?: 'claude' | 'codex' | 'gemini' | 'openclaw' | 'agy';
   error?: string;
   directoryCreated?: boolean;
   message?: string;

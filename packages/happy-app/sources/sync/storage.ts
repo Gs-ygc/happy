@@ -33,6 +33,8 @@ import { DecryptedArtifact } from "./artifactTypes";
 import { FeedItem } from "./feedTypes";
 import { getRigActivityIndicators, getRigIdentity } from './rig';
 import { indexSessionsById } from './sessionIdentity';
+import { mergeSortedMessages } from './messageMerge';
+import { pruneFileCache, pruneHistoricalSessionCaches } from './performanceCache';
 
 // Debounce timer for realtimeMode changes
 let realtimeModeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -571,13 +573,11 @@ export const storage = create<StorageState>()((set, get) => {
 
                     // Always update the session messages, even if no new messages were created
                     // This ensures the reducer state is updated with the new AgentState
-                    const mergedMessagesMap = { ...existingSessionMessages.messagesMap };
-                    processedMessages.forEach(message => {
-                        mergedMessagesMap[message.id] = message;
-                    });
-
-                    const messagesArray = Object.values(mergedMessagesMap)
-                        .sort((a, b) => b.createdAt - a.createdAt);
+                    const { messages: messagesArray, messagesMap: mergedMessagesMap } = mergeSortedMessages(
+                        existingSessionMessages.messages,
+                        existingSessionMessages.messagesMap,
+                        processedMessages,
+                    );
 
                     updatedSessionMessages[session.id] = {
                         messages: messagesArray,
@@ -700,14 +700,11 @@ export const storage = create<StorageState>()((set, get) => {
                 }
 
                 // Merge messages
-                const mergedMessagesMap = { ...existingSession.messagesMap };
-                processedMessages.forEach(message => {
-                    mergedMessagesMap[message.id] = message;
-                });
-
-                // Convert to array and sort by createdAt
-                const messagesArray = Object.values(mergedMessagesMap)
-                    .sort((a, b) => b.createdAt - a.createdAt);
+                const { messages: messagesArray, messagesMap: mergedMessagesMap } = mergeSortedMessages(
+                    existingSession.messages,
+                    existingSession.messagesMap,
+                    processedMessages,
+                );
 
                 // Update session with todos and latestUsage
                 // IMPORTANT: We extract latestUsage from the mutable reducerState and copy it to the Session object
@@ -967,16 +964,16 @@ export const storage = create<StorageState>()((set, get) => {
                 [pathKey]: files
             }
         })),
-        applyFileCache: (sessionId: string, filePath: string, content: string | null, diff: string | null, isBinary: boolean) => set((state) => ({
-            ...state,
-            sessionFileCache: {
+        applyFileCache: (sessionId: string, filePath: string, content: string | null, diff: string | null, isBinary: boolean) => set((state) => {
+            const nextCache = {
                 ...state.sessionFileCache,
                 [sessionId]: {
                     ...(state.sessionFileCache[sessionId] || {}),
                     [filePath]: { content, diff, isBinary, cachedAt: Date.now() }
                 }
-            }
-        })),
+            };
+            return { ...state, sessionFileCache: pruneFileCache(nextCache) };
+        }),
         applyNativeUpdateStatus: (status: { available: boolean; updateUrl?: string } | null) => set((state) => ({
             ...state,
             nativeUpdateStatus: status
@@ -1372,10 +1369,20 @@ export const storage = create<StorageState>()((set, get) => {
             const next = sessionId && state.unreadSessionIds.has(sessionId)
                 ? (() => { const s = new Set(state.unreadSessionIds); s.delete(sessionId); return s; })()
                 : state.unreadSessionIds;
+            const protectedSessionIds = new Set(next);
+            if (sessionId) protectedSessionIds.add(sessionId);
+            for (const session of Object.values(state.sessions)) {
+                const hasRequest = !!session.agentState?.requests && Object.keys(session.agentState.requests).length > 0;
+                if (session.thinking || hasRequest || (session.activityState && session.activityState !== 'idle')) {
+                    protectedSessionIds.add(session.id);
+                }
+            }
+            const updatedAt = Object.fromEntries(Object.values(state.sessions).map(session => [session.id, session.updatedAt]));
             return {
                 ...state,
                 currentViewingSessionId: sessionId,
                 unreadSessionIds: next,
+                sessionMessages: pruneHistoricalSessionCaches(state.sessionMessages, updatedAt, protectedSessionIds),
                 ...(next !== state.unreadSessionIds ? {
                     sessionListViewData: buildSessionListViewData(state.sessions, next),
                 } : {}),

@@ -61,10 +61,10 @@ export interface TaskCenterData {
 export const OTHER_PROJECT_KEY = '__other__';
 
 /**
- * Kept for compatibility with callers that used the former time-window
- * heuristic. Activity membership is now driven by provider events instead.
+ * Explicit provider events take precedence. Recent real message activity is
+ * retained for this window so tasks do not disappear between provider events.
  */
-export const TASK_IDLE_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+export const TASK_IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 /**
  * A session is "online" when it is active AND the daemon reports it online.
@@ -75,8 +75,8 @@ export function isTaskOnline(session: Pick<Session, 'active' | 'presence'>): boo
 }
 
 /**
- * True when the provider reports a work state, or the session has a pending
- * request/goal. Daemon liveness and updatedAt are deliberately insufficient.
+ * True when the provider reports a work state, the session has a pending
+ * request/goal, or a real message recently advanced updatedAt.
  */
 export function isTaskActivelyWorking(session: Session, now: number = Date.now()): boolean {
     const hasPendingRequests = !!(session.agentState?.requests && Object.keys(session.agentState.requests).length > 0);
@@ -94,9 +94,10 @@ export function isTaskActivelyWorking(session: Session, now: number = Date.now()
     if (activityState === 'goal') {
         return true;
     }
-    // The timestamp is intentionally not used to claim that work is running.
-    // It is retained for sorting/history compatibility and stale-data cleanup.
-    return false;
+    const hasRecentRealActivity = session.updatedAt > session.createdAt
+        && now >= session.updatedAt
+        && now - session.updatedAt <= TASK_IDLE_TIMEOUT_MS;
+    return hasRecentRealActivity;
 }
 
 /**

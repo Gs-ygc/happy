@@ -313,7 +313,12 @@ export async function readDaemonState(): Promise<DaemonLocallyPersistedState | n
  * Write daemon state to local file (synchronously for atomic operation)
  */
 export function writeDaemonState(state: DaemonLocallyPersistedState): void {
-  writeFileSync(configuration.daemonStateFile, JSON.stringify(state, null, 2), 'utf-8');
+  // Never truncate the live state file in place. Daemons are commonly hosted
+  // on NFS and a process restart or interrupted write can otherwise leave an
+  // empty JSON file, making the healthy daemon appear offline to every client.
+  const tempPath = `${configuration.daemonStateFile}.${process.pid}.tmp`;
+  writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8');
+  renameSync(tempPath, configuration.daemonStateFile);
 }
 
 /**

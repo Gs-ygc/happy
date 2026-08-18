@@ -9,8 +9,14 @@ import { Metadata } from '@/api/types';
 import { configuration } from '@/configuration';
 
 async function daemonPost(path: string, body?: any): Promise<{ error?: string } | any> {
-  const state = await readDaemonState();
-  if (!state?.httpPort) {
+  // Daemon-spawned children receive the control endpoint directly. This
+  // avoids depending on a concurrently-written state file during startup.
+  const envPort = Number(process.env.HAPPY_DAEMON_HTTP_PORT);
+  const envPid = Number(process.env.HAPPY_DAEMON_PID);
+  const state = envPort > 0 ? null : await readDaemonState();
+  const httpPort = envPort > 0 ? envPort : state?.httpPort;
+  const pid = envPid > 0 ? envPid : state?.pid;
+  if (!httpPort) {
     const errorMessage = 'No daemon running, no state file found';
     logger.debug(`[CONTROL CLIENT] ${errorMessage}`);
     return {
@@ -19,7 +25,7 @@ async function daemonPost(path: string, body?: any): Promise<{ error?: string } 
   }
 
   try {
-    process.kill(state.pid, 0);
+    if (pid) process.kill(pid, 0);
   } catch (error) {
     const errorMessage = 'Daemon is not running, file is stale';
     logger.debug(`[CONTROL CLIENT] ${errorMessage}`);
@@ -30,7 +36,7 @@ async function daemonPost(path: string, body?: any): Promise<{ error?: string } 
 
   try {
     const timeout = process.env.HAPPY_DAEMON_HTTP_TIMEOUT ? parseInt(process.env.HAPPY_DAEMON_HTTP_TIMEOUT) : 10_000;
-    const response = await fetch(`http://127.0.0.1:${state.httpPort}${path}`, {
+    const response = await fetch(`http://127.0.0.1:${httpPort}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),

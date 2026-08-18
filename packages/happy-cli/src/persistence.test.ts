@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { acquireDaemonLock, releaseDaemonLock, SandboxConfigSchema } from './persistence';
+import { acquireDaemonLock, releaseDaemonLock, SandboxConfigSchema, writeDaemonState, readDaemonState } from './persistence';
 
 const mockConfiguration = vi.hoisted(() => ({
     daemonLockFile: '',
@@ -132,5 +132,22 @@ describe('acquireDaemonLock', () => {
 
         expect(lockHandle).toBeNull();
         expect(readFileSync(mockConfiguration.daemonLockFile, 'utf-8')).toBe(String(process.pid));
+    });
+});
+
+describe('daemon state persistence', () => {
+    let testDir: string;
+
+    beforeEach(() => {
+        testDir = mkdtempSync(join(tmpdir(), 'happy-daemon-state-'));
+        mockConfiguration.daemonStateFile = join(testDir, 'daemon.state.json');
+    });
+
+    afterEach(() => rmSync(testDir, { recursive: true, force: true }));
+
+    it('replaces the state atomically and leaves valid JSON', async () => {
+        writeDaemonState({ pid: 42, httpPort: 1234, startTime: 'now', startedWithCliVersion: 'test' });
+        expect(await readDaemonState()).toMatchObject({ pid: 42, httpPort: 1234 });
+        expect(existsSync(`${mockConfiguration.daemonStateFile}.${process.pid}.tmp`)).toBe(false);
     });
 });

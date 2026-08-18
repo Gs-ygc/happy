@@ -15,7 +15,6 @@ import { useUnistyles, StyleSheet } from 'react-native-unistyles';
 import { layout } from '@/components/layout';
 import { FileIcon } from '@/components/FileIcon';
 import { Shaker, ShakeInstance } from '@/components/Shaker';
-import { usePrefetchFileContents } from '@/hooks/usePrefetchFileContents';
 
 export default React.memo(function FilesScreen() {
     const router = useRouter();
@@ -23,8 +22,6 @@ export default React.memo(function FilesScreen() {
 
     const { data: gitStatusFiles, isLoading } = useGitStatusFiles(sessionId!);
 
-    // Prefetch file contents for instant navigation into file view
-    usePrefetchFileContents(sessionId!, gitStatusFiles);
     const [searchQuery, setSearchQuery] = React.useState('');
     const [searchResults, setSearchResults] = React.useState<FileItem[]>([]);
     const [isSearching, setIsSearching] = React.useState(false);

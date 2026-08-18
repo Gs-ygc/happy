@@ -80,6 +80,18 @@ describe('isTaskOnline', () => {
 describe('isTaskActivelyWorking', () => {
     const now = 10_000_000_000;
 
+    it('uses a 24 hour recent-message activity window', () => {
+        expect(TASK_IDLE_TIMEOUT_MS).toBe(24 * 60 * 60 * 1000);
+        expect(isTaskActivelyWorking(sessionWith({
+            createdAt: now - TASK_IDLE_TIMEOUT_MS - 60_000,
+            updatedAt: now - TASK_IDLE_TIMEOUT_MS + 1,
+        }), now)).toBe(true);
+        expect(isTaskActivelyWorking(sessionWith({
+            createdAt: now - TASK_IDLE_TIMEOUT_MS - 60_000,
+            updatedAt: now - TASK_IDLE_TIMEOUT_MS - 1,
+        }), now)).toBe(false);
+    });
+
     it('returns true while the agent is thinking', () => {
         expect(isTaskActivelyWorking(sessionWith({ thinking: true }), now)).toBe(true);
     });
@@ -91,8 +103,8 @@ describe('isTaskActivelyWorking', () => {
         expect(isTaskActivelyWorking(session, now)).toBe(true);
     });
 
-    it('does not infer active work from a recent message timestamp', () => {
-        expect(isTaskActivelyWorking(sessionWith({ createdAt: now - 120_000, updatedAt: now - 60_000 }), now)).toBe(false);
+    it('keeps a session active after a recent real message', () => {
+        expect(isTaskActivelyWorking(sessionWith({ createdAt: now - 120_000, updatedAt: now - 60_000 }), now)).toBe(true);
     });
 
     it('does not treat a newly created session with no messages as active work', () => {
